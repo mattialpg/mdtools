@@ -1,0 +1,27 @@
+dss
+set antialias, 1
+set stick_radius, 0.3
+set movie_fps, 15
+set valence, 1
+set label_size, 16
+set label_font_id, 7
+set retain_order, 1
+
+
+cmd.auto_arg[0]['save']=[lambda: cmd.Shortcut(cmd.get_names("objects", enabled_only=1)), '1st argument', ', ']
+
+alias delsele, for l in cmd.get_object_list('sele'): cmd.delete(l)
+
+# "nice" style
+alias nice, as cartoon; show sticks, organic; util.cbaw all; util.cbao org;\
+#show spheres, inorganic; extract water, resn HOH; alter water, vdw=0.25; hide everything, water
+
+# "qutemol" style
+alias qutemol, set_color oxygen, [1.0,0.4,0.4]; set_color nitrogen, [0.5,0.5,1.0]; remove solvent;\
+as spheres; util.cbaw; set light_count,8; set spec_count,1; set shininess, 10; set specular, 0.45;\
+set ambient,0; set direct,0; set reflect,1.5; set ray_shadow_decay_factor, 0.1;\
+set ray_shadow_decay_range, 2; set depth_cue, 0; set field_of_view, 60
+
+run ~\MEGA\Postdoc\Algoritmi\pymol_scripts\prepare_medoid.py
+run ~\MEGA\Postdoc\Algoritmi\pymol_scripts\draw_bounding_box.py
+run ~\MEGA\Postdoc\Algoritmi\pymol_scripts\ligand_surface.py

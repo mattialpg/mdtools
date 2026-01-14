@@ -14,7 +14,7 @@ import receptor_tools
 import utils
 
 # Import AIDDTools utils
-sys.path.append(R"C:\Users\Idener\Sync\CODE\aiddtools")
+sys.path.append(R"..\aiddtools")
 import interaction_tools as inttools
 
 class Preprocess:
