@@ -14,7 +14,7 @@ import receptor_tools
 import utils
 
 # Import AIDDTools utils
-sys.path.append(R"..\aiddtools")
+sys.path.append("../aiddtools")
 import interaction_tools as inttools
 
 class Preprocess:
@@ -23,6 +23,9 @@ class Preprocess:
         self.lig_smiles = parser_args.lig_new
         self.box = None
         self.logger = utils.get_logger()
+        self.pymol = '/home/mattia/.miniforge3/envs/fraglib/bin/pymol'
+        self.obabel = '/home/mattia/.miniforge3/envs/fraglib/bin/obabel'
+        self.vina = '/home/mattia/.bin/smina.static'
 
     def choose_ligand(self):
         ligands = inttools.get_ligands(f"{self.pdb_id}.pdb")
@@ -49,13 +52,12 @@ class Preprocess:
 
     def get_box(self):
         pymol_script = (
-            f'run C:/Users/Idener/Documents/MEGA/pymol_scripts/draw_bounding_box.py;'
+            f'run /home/mattia/mdtools/pymol_scripts/draw_bounding_box.py;'
             f'load {self.pdb_id}.pdb, prot;'
             f'select lig, chain {self.chain} and resn {self.lig_orig};'
             f'draw_bounding_box lig')
-        exe = R"C:\Users\Idener\AppData\Local\Schrodinger\PyMOL3\Scripts\pymol.exe"
     
-        result = subprocess.run([exe, "-c", "-q", "-d", pymol_script],
+        result = subprocess.run([self.pymol, "-c", "-q", "-d", pymol_script],
             check=True, capture_output=True, text=True).stdout.strip()
 
         lines = result.splitlines()[-2:]
@@ -106,6 +108,10 @@ class DockingSession:
 
     def __init__(self, params):
         self.logger = utils.get_logger()
+
+        self.pymol = '/home/mattia/.miniforge3/envs/fraglib/bin/pymol'
+        self.obabel = '/home/mattia/.miniforge3/envs/fraglib/bin/obabel'
+        self.vina = '/home/mattia/.bin/smina.static'
 
         # Assign attributes from configuration file 
         self.pdb_id = params.get("receptor", "unknown")
@@ -188,7 +194,7 @@ class DockingSession:
             """)
 
         # --- Run vina via subprocess ---
-        cmd = ["vina", "--config", str(vina_conf), "--out", str(docked_out)]
+        cmd = [self.vina, "--config", str(vina_conf), "--out", str(docked_out)]
         subprocess.run(cmd, check=True)
         vina_conf.unlink(missing_ok=True)
 
