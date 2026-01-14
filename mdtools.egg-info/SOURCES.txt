@@ -1,0 +1,5 @@
+setup.py
+mdtools.egg-info/PKG-INFO
+mdtools.egg-info/SOURCES.txt
+mdtools.egg-info/dependency_links.txt
+mdtools.egg-info/top_level.txt
