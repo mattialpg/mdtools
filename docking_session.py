@@ -10,11 +10,11 @@ def tuple_as_literal(dumper, data):
     return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
 yaml.SafeDumper.add_representer(tuple, tuple_as_literal)
 
+import receptor_tools, utils
+
 # Import AIDDTools utils
 sys.path.append("/home/mattia/aiddtools")
 import interaction_tools as inttools
-import receptor_tools
-import utils
 
 
 class Preprocess:
