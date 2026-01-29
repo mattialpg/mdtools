@@ -30,33 +30,6 @@ def setup_logger(logfile: Path):
     )
     return logging.getLogger(__name__)
 
-from pathlib import Path
-
-def read_conf_file(conffile):
-    conffile = Path(conffile)
-    if not conffile.exists():
-        raise FileNotFoundError(f"Configuration file not found: {conffile}")
-
-    # Parse conf values
-    params = {}
-    for line in conffile.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, value = [x.strip() for x in line.split("=", 1)]
-            params[key] = value
-
-    # Parse box values
-    def parse_tuple(s):
-        s = s.strip("() ")
-        return [float(x) for x in s.split(",") if x]
-
-    params["box"] = {"center": parse_tuple(params["box_center"]),
-        "size": parse_tuple(params["box_dimensions"])}
-
-    return params
-
 
 def get_logger() -> logging.Logger:
     import logging, sys
