@@ -18,7 +18,7 @@ from plotly.subplots import make_subplots
 import utils, palettes
 
 # Import AIDDTools utils
-sys.path.append("../aiddtools")
+sys.path.append("/home/mattia/aiddtools")
 import fetching_tools as fetchtools
 import interaction_tools as inttools
 
@@ -36,18 +36,18 @@ class TimeSeriesAnalysis:
             "saltbridge", "pistacking", "pication", "halogen", "metal"]
         
         # Load trajectory
+        print("Loading trajectory...")
         self.traj = md.load_xtc(f"{self.trj_name}.xtc", top=f"{self.trj_name}.gro")
 
 
     def extract_frames(self):
         if not os.path.exists(self.int_dir):
             os.makedirs(self.int_dir)
-            traj = md.load_xtc(f"{self.trj_name}.xtc", top=f"{self.trj_name}.gro")
-            total_frames = traj.n_frames
-            n_extract = 1001
-            frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int) if total_frames >= n_extract else np.arange(total_frames)
-            for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
-                traj[idx].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
+        total_frames = self.traj.n_frames
+        n_extract = 1001
+        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int) if total_frames >= n_extract else np.arange(total_frames)
+        for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
+            self.traj[idx].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
 
 
     def make_occupancy_trace(self, df_int):
