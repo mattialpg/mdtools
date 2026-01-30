@@ -2,7 +2,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import os, sys, glob
-import re
+import re, yaml
 import asyncio, argparse
 import numpy as np
 import pandas as pd
@@ -24,20 +24,19 @@ import interaction_tools as inttools
 
 
 class TimeSeriesAnalysis:
-    def __init__(self, trj_name, config_path="system.conf", outdir='./'):
-        self.trj_name = trj_name
-        self.params = utils.read_conf_file(config_path)
+    def __init__(self, trj_name, config_path="config.yaml", outdir='.'):
+        with open(config_path) as f:
+            self.configs = yaml.safe_load(f)
+        self.ligand_md_id = self.configs["ligand_md_id"]
+        self.pdb_id = self.configs["receptor_id"]
         self.int_dir = f"{outdir}/interaction_analysis"
-        self.lig_id = self.params.get("ligand_id", "LIG")
-        self.lig_cci = self.params.get("ligand_cci", "LIG")
-        self.pdb_id = self.params.get("receptor", "unknown")
         self.tickvals = None
         self.int_types = ["hydrophobic", "hbond", "waterbridge",
             "saltbridge", "pistacking", "pication", "halogen", "metal"]
-        
+
         # Load trajectory
         print("Loading trajectory...")
-        self.traj = md.load_xtc(f"{self.trj_name}.xtc", top=f"{self.trj_name}.gro")
+        self.traj = md.load_xtc(f"{trj_name}.xtc", top=f"{trj_name}.gro")
 
 
     def extract_frames(self):
@@ -45,19 +44,21 @@ class TimeSeriesAnalysis:
             os.makedirs(self.int_dir)
         total_frames = self.traj.n_frames
         n_extract = 1001
-        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int) if total_frames >= n_extract else np.arange(total_frames)
+        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int)\
+            if total_frames >= n_extract else np.arange(total_frames)
         for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
             self.traj[idx].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
 
 
     def make_occupancy_trace(self, df_int):
-        dcolorsc, colorbar_cfg = palettes.discrete_colorscale("geodataviz_diverging_1", self.int_types)
+        dcolorsc, colorbar_cfg = palettes.discrete_colorscale(
+            "geodataviz_diverging_1", self.int_types)
 
         int_priority = {"saltbridge": 1, "metal": 2, "hbond": 3,
                         "waterbridge": 4, "pication": 5, "pistacking": 6,
                         "halogen": 7, "hydrophobic": 8}
 
-        df_lig = df_int[df_int["LIGNAME"] == self.lig_id].copy()
+        df_lig = df_int[df_int["LIGNAME"] == self.ligand_md_id].copy()
         df_lig["INT_PRIORITY"] = df_lig["INT_TYPE"].map(int_priority)
         df_lig = df_lig.sort_values("INT_PRIORITY")
 
@@ -99,9 +100,9 @@ class TimeSeriesAnalysis:
 
 
     def make_rmsd_trace(self):
-        ligand_atoms = self.traj.topology.select(f"resname {self.lig_id}")
+        ligand_atoms = self.traj.topology.select(f"resname {self.ligand_md_id}")
         if not len(ligand_atoms):
-            raise ValueError(f"Ligand '{self.lig_id}' not found")
+            raise ValueError(f"Ligand '{self.ligand_md_id}' not found")
 
         ligand_traj = self.traj.atom_slice(ligand_atoms)
         rmsd = md.rmsd(ligand_traj, ligand_traj, 0)
@@ -123,9 +124,9 @@ class TimeSeriesAnalysis:
 
 
     def make_distance_trace(self):
-        ligand_atoms = self.traj.topology.select(f"resname {self.lig_id}")
+        ligand_atoms = self.traj.topology.select(f"resname {self.ligand_md_id}")
         if not len(ligand_atoms):
-            raise ValueError(f"Ligand '{self.lig_id}' not found")
+            raise ValueError(f"Ligand '{self.ligand_md_id}' not found")
 
         masses = np.array([atom.element.mass for atom in self.traj.topology.atoms if atom.index in ligand_atoms])
         masses /= masses.sum()
@@ -158,7 +159,7 @@ class TimeSeriesAnalysis:
         fig.update_layout(
             xaxis2_title="<b>Time (ns)</b>",
             title=dict(
-                text=f"Interaction occupancy ({self.pdb_id}·{self.lig_cci})",
+                text=f"Interaction occupancy ({self.pdb_id}·{self.ligand_md_id})",
                 x=0.5, y=0.95, xanchor="center", yanchor="top",
                 font=dict(size=20, weight="bold")),
             plot_bgcolor="#C9D0D6",
