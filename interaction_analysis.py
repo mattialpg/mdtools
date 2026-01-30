@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore")
 
 import os, sys, glob
 import re, yaml
+from pathlib import Path
 import asyncio, argparse
 import numpy as np
 import pandas as pd
@@ -24,30 +25,29 @@ import interaction_tools as inttools
 
 
 class TimeSeriesAnalysis:
-    def __init__(self, trj_name, config_path="config.yaml", outdir='.'):
+    def __init__(self, trj_name, config_path="config.yaml"):
         with open(config_path) as f:
             self.configs = yaml.safe_load(f)
+        self.ligand_name = self.configs["ligand_name"]
         self.ligand_md_id = self.configs["ligand_md_id"]
         self.pdb_id = self.configs["receptor_id"]
-        self.int_dir = f"{outdir}/interaction_analysis"
+        self.trj_name = trj_name
+
+        self.workdir = Path(self.configs["workdir"])
+        self.int_dir = self.workdir / f"{self.ligand_name}.interactions"
+  
         self.tickvals = None
         self.int_types = ["hydrophobic", "hbond", "waterbridge",
             "saltbridge", "pistacking", "pication", "halogen", "metal"]
 
-        # Load trajectory
-        print("Loading trajectory...")
-        self.traj = md.load_xtc(f"{trj_name}.xtc", top=f"{trj_name}.gro")
-
 
     def extract_frames(self):
-        if not os.path.exists(self.int_dir):
-            os.makedirs(self.int_dir)
-        total_frames = self.traj.n_frames
-        n_extract = 1001
-        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int)\
-            if total_frames >= n_extract else np.arange(total_frames)
-        for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
-            self.traj[idx].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
+        print("Loading trajectory...")
+        self.traj = md.load_xtc(f"{self.trj_name}.xtc", top=f"{self.trj_name}.gro")
+
+        n_extract = range(min(self.traj.n_frames, 1001))
+        for i in tqdm(n_extract, desc="Exporting MD frames", unit="frame"):
+            self.traj[i].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
 
 
     def make_occupancy_trace(self, df_int):
@@ -188,19 +188,20 @@ class TimeSeriesAnalysis:
         fig.update_xaxes(showgrid=False)
 #        fig.write_image(f"{self.int_dir}/../occupancy.png", scale=5)
         fig.write_html(f"{self.int_dir}/../occupancy.html", include_plotlyjs="cdn")
-        print("Saved occupancy.png")
+        print("Saved occupancy.html")
         return fig
 
 
     def run(self):
-        self.extract_frames()
-
-        try:
-            df_int = pd.read_csv(f"{self.int_dir}/interactions.csv")
-        except FileNotFoundError:
+        if not os.path.exists(self.int_dir):
+            os.makedirs(self.int_dir)
+            self.extract_frames()
             pdb_files = glob.glob(f"{self.int_dir}/*.pdb")
             df_int = inttools.analyse_pdb_files(pdb_files)
             df_int.to_csv(f"{self.int_dir}/interactions.csv", index=False)
+        else:
+            print(f"Using file {self.int_dir}/interactions.csv...")
+            df_int = pd.read_csv(f"{self.int_dir}/interactions.csv")
 
         occupancy_trace = self.make_occupancy_trace(df_int)
         rmsd_trace = self.make_rmsd_trace()
@@ -327,10 +328,9 @@ class CrossTargetAnalysis:
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="Protein-ligand analysis")
     parser.add_argument("--analysis", choices=["time", "targets", "both"], default="time",
-        help="Select which analysis to run: time = time series only targets = cross-target only both = run both")
+        help="Select which analysis to run: time = time series only, targets = cross-target only, both = run both")
     parser.add_argument("--trj_name", help="Trajectory file name for time series analysis")
     parser.add_argument("--pdb_files", help="Path or pattern to PDB files for cross-target analysis (e.g. './*.pdb')")
     parser.add_argument("--cif_files", help="Path or pattern to CIF files for cross-target analysis (e.g. './*.cif')")
