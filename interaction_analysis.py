@@ -142,7 +142,8 @@ class TimeSeriesAnalysis:
             x=self.traj.time / 1000,
             y=dist,
             mode="lines",
-            line=dict(color="#B03060", width=0.7))
+            line=dict(color="#B03060", width=0.7),
+            name="Distance (Å)")
         trace.meta = {"yaxis_params": dict(
             title=dict(text="<b>Distance (Å)</b>",
                 font=dict(color="#B03060", size=12)),
@@ -191,8 +192,8 @@ class TimeSeriesAnalysis:
                          range=[0, dist_upper])
         fig.update_xaxes(showgrid=False)
 #        fig.write_image(f"{self.int_dir}/../occupancy.png", scale=5)
-        fig.write_html(f"{self.int_dir}/../occupancy.html", include_plotlyjs="cdn")
-        print("Saved occupancy.html")
+        fig.write_html(f"{self.int_dir}/../trj_occupancy.html", include_plotlyjs="cdn")
+        print("Saved trj_occupancy.html")
         return fig
 
 
