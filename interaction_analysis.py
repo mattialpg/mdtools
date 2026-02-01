@@ -95,7 +95,8 @@ class TimeSeriesAnalysis:
             colorscale=dcolorsc,
             zmin=0,
             zmax=len(self.int_types),
-            colorbar=colorbar_cfg)
+            colorbar=colorbar_cfg,
+            name='Occupancy')
         trace.meta = {"yaxis_params": dict(
             title_text="<b>Residue</b>", tickmode="linear",
             showgrid=False, secondary_y=False)}
