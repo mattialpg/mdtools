@@ -45,9 +45,12 @@ class TimeSeriesAnalysis:
         print("Loading trajectory...")
         self.traj = md.load_xtc(f"{self.trj_name}.xtc", top=f"{self.trj_name}.gro")
 
-        n_extract = range(min(self.traj.n_frames, 1001))
-        for i in tqdm(n_extract, desc="Exporting MD frames", unit="frame"):
-            self.traj[i].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
+        total_frames = self.traj.n_frames
+        n_extract = 1001
+        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int)\
+            if total_frames >= n_extract else np.arange(total_frames)
+        for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
+            self.traj[idx].save_pdb(f"{self.int_dir}/frame_{i+1:04d}.pdb")
 
 
     def make_occupancy_trace(self, df_int):
