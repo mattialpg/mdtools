@@ -93,9 +93,11 @@ class TimeSeriesAnalysis:
         df_pivot = df_pivot.drop(columns=['NANA'], errors='ignore')
         df_pivot = df_pivot.replace(int_priority)
 
+        print(df_pivot.columns)
         #TODO: adjust residue numbering offset in protein, then remove this
-        df_pivot.columns = [re.sub(r'(\d+)', lambda m: str(int(m.group(1)) + 72), col)
+        df_pivot.columns = [re.sub(R"(\d+)", lambda m: str(int(m.group(1)) + 72), col)
             for col in df_pivot.columns]
+        print(df_pivot.columns)
 
         occupancy = df_pivot.notna().sum() / df_pivot.shape[0]
         kept = occupancy[occupancy >= 0.05].index
@@ -119,7 +121,7 @@ class TimeSeriesAnalysis:
             colorbar=colorbar_cfg, name='Occupancy',
             customdata=np.vectorize(lambda i: self.int_types[int(i)]
                 if i == i else 'NA')(df_pivot.values.T),
-            hovertemplate='Time=%{x:.2f} ns<br>Residue=%{y}<br>Interaction=%{customdata}<extra></extra>')
+            hovertemplate="Time=%{x:.2f} ns<br>Residue=%{y}<br>Interaction=%{customdata}<extra></extra>")
         
         trace.meta = {
             'layout': dict(
@@ -152,7 +154,7 @@ class TimeSeriesAnalysis:
             hovertemplate='RMSD=%{y:.3f} nm<extra></extra>')
 
         trace.meta = {
-            'fig2_layout': dict(
+            'layout': dict(
                 height=250, width=1040,
                 margin=dict(l=100, r=50, t=10, b=65),
                 xaxis_title='<b>Time (ns)</b>',
@@ -211,7 +213,7 @@ class TimeSeriesAnalysis:
         fig2 = go.Figure()
         fig2.add_trace(rmsd_trace)
         fig2.add_trace(distance_trace)
-        fig2.update_layout(**rmsd_trace.meta['fig2_layout'])
+        fig2.update_layout(**rmsd_trace.meta['layout'])
         fig2.update_xaxes(**rmsd_trace.meta['xaxis_params'])
 
         # Compute tickvals and ranges
@@ -264,8 +266,8 @@ class CrossTargetAnalysis:
 
     def analyse_receptors(self):
         # Analise multiple receptors
-        df_int = inttools.analyse_pdb_files(self.pdb_files, xml_outdir='.',
-                      pdb_outdir='.')
+        df_int = inttools.analyse_pdb_files(self.pdb_files,
+            xml_outdir='.', pdb_outdir='.')
 
         # Identify ligands of interest (LOI)
         lig_cci = set()
