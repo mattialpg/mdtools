@@ -1,4 +1,3 @@
-# C:\Users\Idener\Sync\CODE\mdtools\plotly_config.py
 import plotly.io as pio
 
 # Define colours

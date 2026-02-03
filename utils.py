@@ -4,6 +4,35 @@ from pathlib import Path
 import logging, requests
 
 
+def setup_logger():
+    """Create a controlled root logger with consistent handlers."""
+    root = logging.getLogger()
+    root.handlers.clear()
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+    # Console
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+
+    # Fatal-on-error handler
+    def exit_on_error(record):
+        if record.levelno >= logging.ERROR:
+            sys.exit(1)
+    fatal_handler = logging.Handler()
+    fatal_handler.emit = exit_on_error
+    root.addHandler(fatal_handler)
+
+    # Named logger for the manager
+    logger = logging.getLogger(__name__)
+
+    logging.getLogger("plip").setLevel(logging.WARNING)
+    logging.getLogger("rdkit").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
+
+    return logger
+
+
 def ensure_dir(path: Path):
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -19,34 +48,6 @@ def download_pdb(pdb_id, outdir="."):
 
     outpath.write_text(response.text)
     return outpath
-
-
-def setup_logger(logfile: Path):
-    logfile.parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        filename=logfile,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        level=logging.INFO,
-    )
-    return logging.getLogger(__name__)
-
-
-def get_logger() -> logging.Logger:
-    import logging, sys
-
-    logger = logging.getLogger()
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-
-        logging.getLogger("plip").setLevel(logging.WARNING)
-        logging.getLogger("rdkit").setLevel(logging.WARNING)
-        logging.getLogger("urllib3").setLevel(logging.ERROR)
-
-    logger.propagate = False
-    return logger
 
 def round_up_nice(x):
     """Round up to a 'nice' number, excluding 7 and 9 as leading digits.

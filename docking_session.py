@@ -1,7 +1,7 @@
 import os, sys, re
 import subprocess, shutil
 from pathlib import Path
-import logging
+from ast import literal_eval
 import pandas as pd
 
 import yaml
@@ -19,7 +19,7 @@ import interaction_tools as inttools
 
 class Preprocess:
     def __init__(self, args):
-        self.logger = utils.get_logger()
+        self.logger = utils.setup_logger()
 
         self.receptor_id = args.pdb
         self.lig_new_smiles = args.lig_new
@@ -69,8 +69,8 @@ class Preprocess:
             elif line.startswith('Box dimensions'):
                 box_size = re.sub(R"^Box dimensions\s*", '', line).strip()
 
-        self.box_center = tuple(float(x) for x in eval(box_center))
-        self.box_size = tuple(float(x) for x in eval(box_size))
+        self.box_center = tuple(float(x) for x in literal_eval(box_center))
+        self.box_size = tuple(float(x) for x in literal_eval(box_size))
 
 
     def write_conf_file(self, workdir):
@@ -110,14 +110,10 @@ class Preprocess:
 
 class DockingSession:
     def __init__(self, configs):
-        self.logger = utils.get_logger()
-
-        # Bind configs as attributes
+        self.logger = utils.setup_logger()
         for key, value in configs.items():
             setattr(self, key, value)
         self.workdir = Path(self.workdir)
-        self.box = {'center': tuple(self.box_center),
-            'size': tuple(self.box_size)}
 
 
     def prepare_receptor(self, fix_loops=False):
@@ -127,9 +123,13 @@ class DockingSession:
         pdb_outfile = self.workdir / f"{self.receptor_name}.pdb"
         self.receptor_pdbqt = pdb_outfile.with_suffix('.pdbqt')
         
-        receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
-        if fix_loops:
-            receptor_tools.fix_receptor(self.workdir / self.receptor_id, self.chain)
+        flag = receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
+        # if flag:
+            # Do you want to reconstruct gaps?
+            # fix_loops = True
+
+        # if fix_loops:
+        #     receptor_tools.reconstruct_loops(pdb_infile, self.chain)
 
         subprocess.run([self.obabel, str(pdb_outfile), '-xr', '-O', str(self.receptor_pdbqt)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -233,7 +233,6 @@ class RedockSession(DockingSession):
         self.prepare_ligand()
         self.dock()
         self.postprocess()
-        return True
 
 
 if __name__ == '__main__':
@@ -260,10 +259,13 @@ if __name__ == '__main__':
         prep.lig_new_id = lig_new_id
         prep.lig_new_smiles = lig_new_smiles
 
-        workdir = Path(f"{args.pdb}_{lig_new_id}").resolve()
-        pdb_src = Path(f"{args.pdb}.pdb")
-        workdir.mkdir(exist_ok=True)
-        shutil.copy2(pdb_src, workdir / pdb_src.name)
+        if len(ligands_new) > 1:
+            workdir = Path(f"{args.pdb}_{lig_new_id}").resolve()
+            workdir.mkdir(exist_ok=True)
+            pdb_src = Path(f"{args.pdb}.pdb")
+            shutil.copy2(pdb_src, workdir / pdb_src.name)
+        else:
+            workdir = Path('.').resolve()
 
         configs = prep.write_conf_file(workdir)
 

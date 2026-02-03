@@ -1,9 +1,9 @@
 from pathlib import Path
 from pymol2 import PyMOL
-from pymol import stored
-import subprocess
-import requests
-# from modeller import Environ, Model, Alignment, automodel
+from itertools import pairwise
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
@@ -12,24 +12,28 @@ def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
     out = Path(pdb_outfile).resolve()
 
     if not pdb_path.exists():
-        raise FileNotFoundError(f"PDB file not found: {pdb_path}")
+        logger.error(f"PDB file not found: {pdb_path}")
 
     with PyMOL() as pm:
         pm.cmd.load(str(pdb_path), 'prot')
         pm.cmd.select('sel', f"polymer and chain {chain}")
-
-        # Check secondary structure 
-        pm.cmd.dss('sel')
-        stored.missing_ss = 0
-        pm.cmd.iterate('sel and name CA', 'stored.missing_ss += 1 if ss in ("", "C") else 0')
-        if stored.missing_ss:
-            print(f"Warning: {stored.missing_ss} residues lack secondary structure in chain {chain}")
-
         pm.cmd.save(str(out), 'sel')
+
+        # Check for residue gaps
+        residues = []
+        pm.cmd.iterate('sel and name CA', 'residues.append(resv)',
+            space={'residues': residues})
+        gaps = [(a + 1, b - 1) for a, b in pairwise(sorted(set(residues))) if b - a > 1]
+        if gaps:
+            gap_text = ', '.join(f"{s}-{e}" if s != e else f"{s}" for s, e in gaps)
+            logger.warning(f"Missing residues in chain {chain}: {gap_text}")
+            return True
 
 
 def reconstruct_loops(pdb_id, chain='A'):
     """Simplified MODELLER-based loop reconstruction."""
+    from modeller import Environ, Model, Alignment, automodel
+
     env = Environ()
     model_code = f"{pdb_id}_{chain}"
     pdb_path = Path(f"{pdb_id}.pdb")
@@ -43,10 +47,5 @@ def reconstruct_loops(pdb_id, chain='A'):
     a.starting_model = 1
     a.ending_model = 1
     a.make()
-    return Path(f"bestmodel_{model_code}.pdb")
 
-
-def fix_receptor(pdb_id, chain='A', run_loops=True):
-    if run_loops:
-        reconstruct_loops(pdb_id, chain)
-    return extract_receptor(f"{pdb_id}.pdb", chain)
+    logger.info(Path(f"bestmodel_{model_code}.pdb"))
