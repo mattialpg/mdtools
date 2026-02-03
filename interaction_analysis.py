@@ -93,12 +93,6 @@ class TimeSeriesAnalysis:
         df_pivot = df_pivot.drop(columns=['NANA'], errors='ignore')
         df_pivot = df_pivot.replace(int_priority)
 
-        print(df_pivot.columns)
-        #TODO: adjust residue numbering offset in protein, then remove this
-        df_pivot.columns = [re.sub(R"(\d+)", lambda m: str(int(m.group(1)) + 72), col)
-            for col in df_pivot.columns]
-        print(df_pivot.columns)
-
         occupancy = df_pivot.notna().sum() / df_pivot.shape[0]
         kept = occupancy[occupancy >= 0.05].index
         df_pivot = df_pivot[kept]

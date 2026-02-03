@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
     """Extract a polymer chain from a PDB/CIF using PyMOL."""
+    #TODO: adjust residue numbering offset in protein
+    
     pdb_path = Path(pdb_infile).resolve()
     out = Path(pdb_outfile).resolve()
 
@@ -49,3 +51,4 @@ def reconstruct_loops(pdb_id, chain='A'):
     a.make()
 
     logger.info(Path(f"bestmodel_{model_code}.pdb"))
+    
