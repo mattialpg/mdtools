@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: bash make_equil.sh ligand1 [ligand2 ...]
+# Usage: bash make_equil.sh [ligand1 ligand2 ...]
 
 set -euo pipefail
 
@@ -7,7 +7,7 @@ ligands="$@"
 
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Preparing protein...\e[0m\n\n"
 gmx pdb2gmx -f protein.pdb -o protein.gro -merge all -ignh -ff amber99sb-ildn -water tip3p
-sleep 3
+sleep 2
 
 ### CREATE COMPLEX ###
 if [ -n "$ligands" ]; then
@@ -42,8 +42,8 @@ if [ -n "$ligands" ]; then
     } | sed -i "$((line + 1))r /dev/stdin" topol.top
 
     for ligand in $ligands; do
-          ligand_name=$(sed -n '2p' "${ligand}.mol2" | tr -d '\r' | xargs)  # Extract the second line from ${ligand}.mol2
-        sed -i -e "\$a${ligand_name}                 1" topol.top  # Append the ligand name at the end of topol.top
+          ligand_md_id=$(sed -n '2p' "${ligand}.sdf" | tr -d '\r' | xargs)  # Extract the second line from ${ligand}.sdf
+        sed -i -e "\$a${ligand_md_id}                 1" topol.top  # Append the ligand name at the end of topol.top
     done    
 else
     cp protein.gro complex.gro
@@ -73,7 +73,7 @@ gmx editconf -f complex.gro -o complex_box.gro -bt dodecahedron -d 1
 gmx solvate -cp complex_box.gro -cs spc216.gro -p topol.top -o complex_solv.gro
 gmx grompp -f ions.mdp -c complex_solv.gro -p topol.top -o ions.tpr -maxwarn 100
 echo 'SOL' | gmx genion -s ions.tpr -o system.gro -p topol.top -pname NA -nname CL -neutral
-sleep 3
+sleep 2
 rm complex_box.gro complex_solv.gro
 
 if [ -n "$ligands" ]; then
@@ -103,7 +103,7 @@ fi
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Creating protein restraints...\e[0m\n\n"
 echo -e "3\nq" | gmx make_ndx -f system.gro -o index.ndx
 echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
-sleep 3
+sleep 2
 
 ### MINIMISE COMPLEX ###
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Minimising complex...\e[0m\n\n"
@@ -128,7 +128,7 @@ EOF
 
 gmx grompp -f em.mdp -c system.gro -r system.gro -p topol.top -o em.tpr -maxwarn 100
 gmx mdrun -deffnm em -ntomp 24 -ntmpi 1 -v
-sleep 3
+sleep 2
 
 ### NVT/NPT EQUILIBRATION ###
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Equilibrating in NVT/NPT ensemble...\e[0m\n\n"

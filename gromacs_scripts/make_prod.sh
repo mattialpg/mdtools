@@ -23,7 +23,7 @@ cat > prod.mdp <<EOF
 
 ; Run parameters
 integrator              = md
-nsteps                  = ${NSTEPS}    ; DT * $NSTEPS = ${LENGTH} ns
+nsteps                  = ${NSTEPS}    ; ${DT} * ${NSTEPS} = ${LENGTH} ns
 dt                      = ${DT}
 
 ; Output control
