@@ -3,6 +3,8 @@ import subprocess, shutil
 from pathlib import Path
 from ast import literal_eval
 import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import AllChem
 
 import yaml
 def tuple_as_literal(dumper, data):
@@ -137,15 +139,15 @@ class DockingSession:
 
     def prepare_ligand(self):
         self.logger.info(f"Preparing ligand {self.ligand_id}")
-        mol2_free = self.workdir / f"{self.ligand_name}_free.mol2"
+        sdf_free = self.workdir / f"{self.ligand_name}_free.sdf"
         pdbqt_free = self.workdir / f"{self.ligand_name}_free.pdbqt"
 
         # Generate 3D ligand from SMILES
-        subprocess.run([self.obabel, f"-:{self.ligand_smiles}", '-O', str(mol2_free), '--gen3d'],
+        subprocess.run([self.obabel, f"-:{self.ligand_smiles}", '-O', str(sdf_free), '--gen3d'],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Convert MOL2 to PDBQT
-        subprocess.run([self.obabel, str(mol2_free), '-O', str(pdbqt_free)],
+        # Convert SDF to PDBQT
+        subprocess.run([self.obabel, str(sdf_free), '-O', str(pdbqt_free)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.logger.info(f"Ligand prepared: {pdbqt_free}")
         self.ligand_pdbqt = pdbqt_free
@@ -185,34 +187,44 @@ class DockingSession:
 
 
     def postprocess(self):
-        # Split docked poses into individual MOL2 files
+        # Split docked poses into individual SDF files
         subprocess.run([self.obabel, str(self.docked_file), '-O',
-            str(self.workdir / f"{self.docked_name}_0*.mol2"), '-h'],
+            str(self.workdir / f"{self.docked_name}_0*.sdf")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Add hydrogens using PyMOL
         pymol_script = self.workdir / 'add_hydrogens.pml'
         with pymol_script.open('w') as pml:
-            for f in self.workdir.glob(f"{self.docked_name}_0*.mol2"):
+            for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
                 pml.write(f"load {f}, lig; h_add lig; save {f}, lig; delete lig;\n")
             pml.write('quit\n')
         subprocess.run([self.pymol, '-cq', '-r', str(pymol_script)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         pymol_script.unlink()
 
-        # Fix MOL2 files
-        perl_script = Path(__file__).parent / 'sort_mol2_bonds.pl'
-        for f in self.workdir.glob(f"{self.docked_name}_0*.mol2"):
-            # Remove non-standard header lines
-            subprocess.run(['sed', '-i', '1{/^#/d;}', str(f)], check=True)
+        # Fix bond order/aromaticity
+        sdf_free = self.workdir / f"{self.ligand_name}_free.sdf"
+        template = Chem.MolFromMolFile(str(sdf_free), sanitize=True, removeHs=False)
+        for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
+            pose = Chem.MolFromMolFile(str(f), sanitize=True, removeHs=False)
+            match = pose.GetSubstructMatch(template)
+            pose = Chem.RenumberAtoms(pose, list(match))
+            fixed = AllChem.AssignBondOrdersFromTemplate(template, pose)
+            Chem.MolToMolFile(fixed, str(f.with_suffix('.sdf')))
 
-            # Sort bonds with Perl script
-            subprocess.run(['perl', str(perl_script), str(f), str(f)],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # # Fix SDF files
+        # perl_script = Path(__file__).parent / 'sort_sdf_bonds.pl'
+        # for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
+        #     # Remove non-standard header lines
+        #     subprocess.run(['sed', '-i', '1{/^#/d;}', str(f)], check=True)
 
-            # Fix ligand name
-            pattern = Rf"s/\b\(UNL\|{self.ligand_md_id}\)[[:space:]]*[0-9]*/{self.ligand_md_id}/g"
-            subprocess.run(['sed', '-i', pattern, str(f)], check=True)
+        #     # Sort bonds with Perl script
+        #     subprocess.run(['perl', str(perl_script), str(f), str(f)],
+        #         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        #     # Fix ligand name
+        #     pattern = Rf"s/\b\(UNL\|{self.ligand_md_id}\)[[:space:]]*[0-9]*/{self.ligand_md_id}/g"
+        #     subprocess.run(['sed', '-i', pattern, str(f)], check=True)
 
         result_dir = self.workdir / f"{self.ligand_name}.vina"
         if result_dir.exists():

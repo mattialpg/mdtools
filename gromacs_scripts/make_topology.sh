@@ -3,8 +3,8 @@ set -euo pipefail
 shopt -s nullglob
 
 # Check if an input file is provided
-if [ -z "${1:-}" ] || [ "${1##*.}" != "mol2" ]; then
-  echo "Usage: $0 <input_file.mol2>"
+if [ -z "${1:-}" ] || [ "${1##*.}" != "sdf" ]; then
+  echo "Usage: $0 <input_file.sdf>"
   exit 1
 fi
 
@@ -16,20 +16,22 @@ ligand_name=$(sed -n '2p' "${input_file}" | tr -d '\r' | xargs)
 cat > tleap_topology.in <<EOF
 source leaprc.gaff2
 loadamberparams ${output_name}.frcmod
-LIG = loadmol2 ${output_name}.mol2
-check LIG
-saveamberparm LIG ${output_name}.prmtop ${output_name}.rst7
+LIGAND = loadmol2 ${output_name}.mol2
+check LIGAND
+saveamberparm LIGAND ${output_name}.prmtop ${output_name}.rst7
 quit
 EOF
 
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Calculating charges...\e[0m\n\n"
-antechamber -i "$input_file" -fi mol2 -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
+antechamber -i "$input_file" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
 rm -rf "${base_name}.antechamber" && mkdir "${base_name}.antechamber"
 mv ANTECHAMBER_* ATOMTYPE* sqm.* "${base_name}.antechamber"
 
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Generating Amber topology...\e[0m\n\n"
 parmchk2 -i "${output_name}.mol2" -f mol2 -o "${output_name}.frcmod" -s gaff2
 tleap -f tleap_topology.in
+
+exit(0)
 
 printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Converting to GROMACS topology...\e[0m\n\n"
 acpype -i "${output_name}.mol2" 2> >(grep -Ev \

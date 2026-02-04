@@ -143,7 +143,7 @@ class TimeSeriesAnalysis:
             x=self.traj.time / 1000,
             y=rmsd,
             mode='lines',
-            line=dict(color='#1A2228', width=1.2),
+            line=dict(color='#1A2228', width=1.1),
             name='RMSD (nm)',
             hovertemplate='RMSD=%{y:.3f} nm<extra></extra>')
 
@@ -182,7 +182,7 @@ class TimeSeriesAnalysis:
             x=self.traj.time / 1000,
             y=dist,
             mode='lines',
-            line=dict(color='#B03060', width=1.2),
+            line=dict(color='#B03060', width=1.1),
             name='Distance (Å)',
             hovertemplate='Distance=%{y:.2f} Å<extra></extra>')
         
