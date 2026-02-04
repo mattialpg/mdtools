@@ -210,12 +210,13 @@ class DockingSession:
             match = pose.GetSubstructMatch(template)
             pose = Chem.RenumberAtoms(pose, list(match))
             fixed = AllChem.AssignBondOrdersFromTemplate(template, pose)
-            fixed.SetProp("_Name", self.ligand_md_id)
             Chem.MolToMolFile(fixed, str(f.with_suffix('.sdf')))
+            subprocess.run(["sed", "-i", f"2c\\{self.ligand_md_id}", str(f.with_suffix(".sdf"))],
+                check=True)
 
         # # Fix MOL2 files
-        # perl_script = Path(__file__).parent / 'sort_sdf_bonds.pl'
-        # for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
+        # perl_script = Path(__file__).parent / 'sort_mol2_bonds.pl'
+        # for f in self.workdir.glob(f"{self.docked_name}_0*.mol2"):
         #     # Remove non-standard header lines
         #     subprocess.run(['sed', '-i', '1{/^#/d;}', str(f)], check=True)
 
