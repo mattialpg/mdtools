@@ -74,7 +74,42 @@ EOF
 
 ### PRODUCTION ###
 log " > Running production dynamics..."
-echo "Simulation length: ${LENGTH} ns (${DT} ps * ${NSTEPS} steps"
-gmx grompp -f prod.mdp -c npt.gro -t npt.cpt -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
-gmx mdrun -deffnm "${OUT_NAME}" -bonded gpu -pme gpu
+echo "Simulation length: ${LENGTH} ns (${DT} ps * ${NSTEPS} steps)"
 
+THRESH_NM=1.2        # stop if distance > this (nm)
+POLL_SEC=600         # check every 10 minutes wall time
+CPT_MIN=5            # write checkpoint every 5 minutes wall time
+
+gmx grompp -f prod.mdp -c npt.gro -t npt.cpt -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
+
+# run MD in background with frequent checkpoints
+gmx mdrun -deffnm "${OUT_NAME}" -bonded gpu -pme gpu -cpt ${CPT_MIN} &
+MDPID=$!
+
+# monitor loop
+while kill -0 "${MDPID}" 2>/dev/null; do
+  sleep "${POLL_SEC}"
+
+  [ -f "${OUT_NAME}.cpt" ] || continue
+
+  # extract last structure from checkpoint
+  printf "0\n" | gmx trjconv -s "${OUT_NAME}.tpr" -f "${OUT_NAME}.cpt" -o last.gro >/dev/null 2>&1 || continue
+
+  # measure COM distance between Protein and LIG using an index file
+  gmx distance -s "${OUT_NAME}.tpr" -f last.gro -n index.ndx \
+    -select 'com of group "Protein" plus com of group "LIG"' \
+    -oall dist.xvg >/dev/null 2>&1 || continue
+
+  d=$(awk 'NF==2 && $1 !~ /^[@#]/ {v=$2} END{print v+0}' dist.xvg)
+
+  log " > Protein-LIG distance: ${d} nm"
+
+  awk -v d="${d}" -v t="${THRESH_NM}" 'BEGIN{exit !(d>t)}'
+  if [ $? -eq 0 ]; then
+    log " > Threshold exceeded (${d} > ${THRESH_NM}), stopping mdrun"
+    kill -TERM "${MDPID}"
+    break
+  fi
+done
+
+wait "${MDPID}"
