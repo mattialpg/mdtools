@@ -77,8 +77,11 @@ log " > Running production dynamics..."
 echo "Simulation length: ${LENGTH} ns (${DT} ps * ${NSTEPS} steps)"
 
 THRESH_NM=1.2        # stop if distance > this (nm)
-POLL_SEC=600         # check every 10 minutes wall time
+POLL_SEC=300         # check every 10 minutes wall time
 CPT_MIN=5            # write checkpoint every 5 minutes wall time
+
+# safety: avoid monitor hanging forever inside a gmx tool
+TIMEOUT_SEC=180      # max seconds for each gmx analysis command
 
 gmx grompp -f prod.mdp -c npt.gro -t npt.cpt -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
 
@@ -90,19 +93,28 @@ MDPID=$!
 while kill -0 "${MDPID}" 2>/dev/null; do
   sleep "${POLL_SEC}"
 
-  [ -f "${OUT_NAME}.cpt" ] || continue
+  [ -f "${OUT_NAME}.xtc" ] || continue
+  [ -f "${OUT_NAME}.tpr" ] || continue
 
-  # extract last structure from checkpoint
-  printf "0\n" | gmx trjconv -s "${OUT_NAME}.tpr" -f "${OUT_NAME}.cpt" -o last.gro >/dev/null 2>&1 || continue
+  # copy xtc to avoid racing with a file being written
+  cp -f "${OUT_NAME}.xtc" monitor.xtc 2>/dev/null || continue
+
+  # get time (ps) of last frame currently present in xtc
+  t_last=$(gmx check -f monitor.xtc 2>/dev/null | awk '/Last frame/ {print $(NF-1)}')
+  [ -n "${t_last}" ] || { log " > Could not read last frame time from monitor.xtc"; continue; }
+
+  # extract last frame to a gro
+  timeout "${TIMEOUT_SEC}" bash -lc 'printf "0\n" | gmx trjconv -s "'"${OUT_NAME}.tpr"'" -f monitor.xtc -dump "'"${t_last}"'" -o last.gro' \
+    >/dev/null 2>trjconv.err || { log " > trjconv failed/hung: $(tail -5 trjconv.err | tr "\n" " ")"; continue; }
 
   # measure COM distance between Protein and LIG using an index file
-  gmx distance -s "${OUT_NAME}.tpr" -f last.gro -n index.ndx \
+  timeout "${TIMEOUT_SEC}" gmx distance -s "${OUT_NAME}.tpr" -f last.gro -n index.ndx \
     -select 'com of group "Protein" plus com of group "LIG"' \
-    -oall dist.xvg >/dev/null 2>&1 || continue
+    -oall dist.xvg >/dev/null 2>distance.err || { log " > distance failed/hung: $(tail -5 distance.err | tr "\n" " ")"; continue; }
 
   d=$(awk 'NF==2 && $1 !~ /^[@#]/ {v=$2} END{print v+0}' dist.xvg)
 
-  log " > Protein-LIG distance: ${d} nm"
+  log " > Protein-LIG distance: ${d} nm (last frame at ${t_last} ps)"
 
   awk -v d="${d}" -v t="${THRESH_NM}" 'BEGIN{exit !(d>t)}'
   if [ $? -eq 0 ]; then
