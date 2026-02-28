@@ -1,59 +1,43 @@
 #!/bin/bash
+set -euo pipefail
+
 # Usage:
-#   ./make_extend.sh --mdname <mdname_name> --extend <extend_time_ns>
+#   ./make_extend.sh -mdname <mdname_name> -extend <extend_time_ns>
 # Example:
-   ./make_extend.sh --mdname md_100 --extend 200
+#   ./make_extend.sh -mdname md_100 -extend 200
 
-# Embed completion section
-if [[ $1 == --complete ]]; then
-    echo "-mdname -extend -h"
-    exit 0
-fi
-
-# Parse command-line arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --mdname)
-            mdname="$2"
-            shift 2
-            ;;
-        --extend)
-            extend_ns="$2"
-            shift 2
-            ;;
-        --help)
-            echo "Usage: $0 --mdname <mdname_name> --extend <extend_time_ns>"
-            echo "Example: $0 --mdname md_100 --extend 200"
-            exit 0
-            ;;
-        *)
-            echo "Unknown parameter: $1"
-            echo "Usage: $0 --mdname <mdname_name> --extend <extend_time_ns>"
-            exit 1
-            ;;
-    esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -mdname) MDNAME="$2"; shift 2 ;;
+    -extend) EXTEND_NS="$2"; shift 2 ;;
+    -h|--help)
+      echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"
+      echo "Example: $0 -mdname md_100 -extend 200"
+      exit 0
+      ;;
+    *) echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"; exit 1 ;;
+  esac
 done
 
-# Check input
-if [ -z "$mdname" ] || [ -z "$extend_ns" ]; then
-    echo "Error: missing required arguments."
-    echo "Usage: $0 --mdname <mdname_name> --extend <extend_time_ns>"
-    exit 1
+if [[ -z "${MDNAME:-}" || -z "${EXTEND_NS:-}" ]]; then
+  echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"
+  exit 1
 fi
 
-# Convert ns to ps for gmx convert-tpr
-extend_ps=$(echo "$extend_ns * 1000" | bc)
+log() {
+  printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
+}
 
-# Derive new TPR name
-new_tpr="${mdname%_*}_extend.tpr"
+# Extract original length
+ORIG_NS="${MDNAME##*_}"
+TOTAL_NS="$(awk -v A="$ORIG_NS" -v B="$EXTEND_NS" 'BEGIN { printf "%.0f", (A+B) }')"
+NEW_MDNAME="md_${TOTAL_NS}"
+EXTEND_PS="$(awk -v X="$EXTEND_NS" 'BEGIN { printf "%.0f", (X*1000.0) }')"
 
-# Step 1: Extend the TPR file
-gmx convert-tpr -s ${mdname}.tpr -extend ${extend_ps} -o ${new_tpr}
-if [ $? -ne 0 ]; then
-    echo "Error: gmx convert-tpr failed"
-    exit 1
-fi
+# Extend dynamics
+log " > Continuing simulation (appending to existing files)..."
+gmx convert-tpr -s "${MDNAME}.tpr" -extend "${EXTEND_PS}" -o "${NEW_MDNAME}.tpr"
+gmx mdrun -deffnm "${MDNAME}" -s "${NEW_MDNAME}.tpr" -cpi "${MDNAME}.cpt" -bonded gpu -pme gpu -append
 
-# Step 2: Continue the simulation (appending to existing files)
-gmx mdrun -deffnm ${mdname} -s ${new_tpr} -cpi ${mdname}.cpt -v
-
+# Rename all original output files except the new TPR
+rename -f "s/^${MDNAME}/${NEW_MDNAME}/" *

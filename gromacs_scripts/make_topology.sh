@@ -2,11 +2,31 @@
 set -euo pipefail
 shopt -s nullglob
 
-# Check ligand file
-if [ -z "${1:-}" ] || [[ "$1" == *.* ]] || [ ! -s "${1}.sdf" ]; then
-  echo "Usage: $0 <ligand_name>"
+# Usage:
+#   ./make_topology.sh -ligand LIGAND_NAME
+
+# Parse command-line args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -ligand) LIGAND_NAME="$2"; shift 2 ;;
+    -h|--help)
+      echo "Usage: $0 -ligand LIGAND_NAME"
+      exit 0
+      ;;
+    *) echo "Usage: $0 -ligand LIGAND_NAME"; exit 1 ;;
+  esac
+done
+
+if [[ -z "${LIGAND_NAME:-}" || "${LIGAND_NAME}" == *.* || ! -s "${LIGAND_NAME}.sdf" ]]; then
+  echo "Usage: $0 -ligand LIGAND_NAME"
   exit 1
 fi
+
+ligand_name="${LIGAND_NAME}"
+
+log() {
+  printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
+}
 
 ligand_name="$1"
 output_name="${ligand_name}_amber"
@@ -21,17 +41,17 @@ saveamberparm LIGAND ${output_name}.prmtop ${output_name}.rst7
 quit
 EOF
 
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Calculating charges...\e[0m\n\n"
+log " >  Calculating charges..."
 antechamber -i "${ligand_name}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
 sed -i "s/\<MOL\>/${ligand_md_id}/g" "${output_name}.mol2"
 rm -rf "${ligand_name}.antechamber"; mkdir "${ligand_name}.antechamber"
 mv ANTECHAMBER_* ATOMTYPE* sqm.* "${ligand_name}.antechamber"
 
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Generating Amber topology...\e[0m\n\n"
+log " >  Generating Amber topology..."
 parmchk2 -i "${output_name}.mol2" -f mol2 -o "${output_name}.frcmod" -s gaff2
 tleap -f tleap_topology.in
 
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Converting to GROMACS topology...\e[0m\n\n"
+log " >  Converting to GROMACS topology..."
 acpype -i "${output_name}.mol2" 2> >(grep -Ev \
   "OpenBabel|Open Babel|Cannot perform atom type translation|
   This Mol2 file is non-standard|Cannot interpret atom type|

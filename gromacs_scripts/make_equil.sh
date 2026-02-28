@@ -1,11 +1,28 @@
 #!/bin/bash
-# Usage: bash make_equil.sh [ligand1 ligand2 ...]
-
 set -euo pipefail
 
-ligands="$@"
+# Usage:
+#   bash make_equil.sh [ligand1 ligand2 ...]
 
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Preparing protein...\e[0m\n\n"
+# Parse command-line args
+LIGANDS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      echo "Usage: bash make_equil.sh [ligand1 ligand2 ...]"
+      exit 0
+      ;;
+    *) LIGANDS+=("$1"); shift ;;
+  esac
+done
+
+ligands="${LIGANDS[*]}"
+
+log() {
+  printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
+}
+
+log " >  Preparing protein..."
 gmx pdb2gmx -f protein.pdb -o protein.gro -merge all -ignh -ff amber99sb-ildn -water tip3p
 sleep 2
 
@@ -51,7 +68,7 @@ fi
 
 ### CREATE BOX AND SOLVATE ###
 # Should be -d >= rvdw but d != 1.0 fails to minimise
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Solvating complex...\e[0m\n\n"
+log " >  Solvating complex..."
 cat << EOF > ions.mdp
 integrator       = steep           ; Algorithm (steep = steepest descent minimization)
 emtol            = 1000.0          ; Stop when the max force < 100 kJ/mol/nm
@@ -78,7 +95,7 @@ rm complex_box.gro complex_solv.gro
 
 if [ -n "$ligands" ]; then
     ### CREATE LIGAND RESTRAINTS ###
-    printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Creating ligand restraints...\e[0m\n\n"
+    log " >  Creating ligand restraints..."
     line=$(sed -n '/Include ligand topology/=' topol.top)
     
     for ligand in $ligands; do
@@ -100,13 +117,13 @@ if [ -n "$ligands" ]; then
 fi
 
 ### CREATE C-ALPHA RESTRAINTS ###
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Creating protein restraints...\e[0m\n\n"
+log " >  Creating protein restraints..."
 echo -e "3\nq" | gmx make_ndx -f system.gro -o index.ndx
 echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
 sleep 2
 
 ### MINIMISE COMPLEX ###
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Minimising complex...\e[0m\n\n"
+log " >  Minimising complex..."
 cat << EOF > em.mdp
 ; Working with ff99SB-ILDN
 
@@ -131,7 +148,7 @@ gmx mdrun -deffnm em -ntomp 24 -ntmpi 1 -v
 sleep 2
 
 ### NVT/NPT EQUILIBRATION ###
-printf "\e[38;2;255;255;255m\e[48;2;15;88;157m\n >  Equilibrating in NVT/NPT ensemble...\e[0m\n\n"
+log " >  Equilibrating in NVT/NPT ensemble..."
 cat << EOF > nvt.mdp
 ; Working with ff99SB-ILDN
 

@@ -1,16 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage:
+#   ./run.sh -length NS
+
 # Parse command-line args
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -length) LENGTH="$2"; shift 2 ;;
-    *) echo "Usage: $0 [-length NS]"; exit 1 ;;
+    -h|--help)
+      echo "Usage: $0 -length NS"
+      exit 0
+      ;;
+    *) echo "Usage: $0 -length NS"; exit 1 ;;
   esac
 done
 
-LENGTH=100   # ns
-DT=0.002     # ps (2 fs)
+LENGTH="${LENGTH:-100}"   # ns
+DT=0.002                  # ps (2 fs)
 OUT_NAME="md_${LENGTH}"
 NSTEPS="$(awk -v L="$LENGTH" -v DT="$DT" 'BEGIN { printf "%.0f", (L*1000.0/DT) }')"
 
@@ -74,7 +81,6 @@ EOF
 
 ### PRODUCTION ###
 log " > Running production dynamics..."
-echo "Simulation length: ${LENGTH} ns (${DT} ps * ${NSTEPS} steps"
+echo "Simulation length: ${LENGTH} ns (${DT} ps * ${NSTEPS} steps)"
 gmx grompp -f prod.mdp -c npt.gro -t npt.cpt -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
 gmx mdrun -deffnm "${OUT_NAME}" -bonded gpu -pme gpu
-
