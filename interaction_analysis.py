@@ -67,9 +67,9 @@ class TimeSeriesAnalysis:
 
     def extract_frames(self):
         total_frames = self.traj.n_frames
-        n_extract = 1001
-        frame_indices = np.linspace(0, total_frames - 1, n_extract, dtype=int)\
-            if total_frames >= n_extract else np.arange(total_frames)
+        max_frames = 1001
+        frame_indices = np.linspace(0, total_frames - 1, max_frames, dtype=int)\
+            if total_frames >= max_frames else np.arange(total_frames)
         for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit='frame')):
             self.traj[idx].save_pdb(f'{self.int_dir}/frame_{i+1:04d}.pdb')
 
@@ -122,7 +122,7 @@ class TimeSeriesAnalysis:
                 height=500, width=1100,
                 margin=dict(l=100, r=50, t=65, b=0),
                 title=dict(
-                    text=f"Interaction occupancy ({self.pdb_id}·{self.ligand_md_id})",
+                    text=f"Interaction occupancy ({self.pdb_id}-{self.ligand_md_id})",
                     x=0.5, y=0.95, xanchor='center', yanchor='top',
                     font=dict(size=20, weight='bold')),
                 plot_bgcolor='#C9D0D6',
@@ -135,13 +135,31 @@ class TimeSeriesAnalysis:
 
 
     def make_rmsd_trace(self):
-        ligand_atoms = self._get_ligand_atoms()
-        ligand_traj = self.traj.atom_slice(ligand_atoms)
-        rmsd = md.rmsd(ligand_traj, ligand_traj, 0)
+        rmsd_path = Path('trj_rmsd_lig.xvg')
+        rmsd_rows = []
+        with rmsd_path.open() as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(('@', '#')):
+                    continue
+                fields = stripped.split()
+                if len(fields) < 2:
+                    continue
+                try:
+                    rmsd_rows.append((float(fields[0]), float(fields[1])))
+                except ValueError:
+                    continue
+        rmsd_df = pd.DataFrame(rmsd_rows, columns=['time_ns', 'rmsd_nm'])
+        if rmsd_df.empty:
+            raise ValueError(f'No RMSD data found in {rmsd_path}')
+        max_frames = 1001
+        rmsd_indices = np.linspace(0, len(rmsd_df) - 1, max_frames, dtype=int) \
+            if len(rmsd_df) >= max_frames else np.arange(len(rmsd_df))
+        rmsd_df = rmsd_df.iloc[rmsd_indices]
 
         trace = go.Scatter(
-            x=self.traj.time / 1000,
-            y=rmsd,
+            x=rmsd_df['time_ns'],
+            y=rmsd_df['rmsd_nm'],
             mode='lines',
             line=dict(color='#1A2228', width=1.1),
             name='RMSD (nm)',
@@ -172,24 +190,40 @@ class TimeSeriesAnalysis:
 
 
     def make_distance_trace(self):
-        ligand_atoms = self._get_ligand_atoms()
-        masses = self._get_ligand_masses(ligand_atoms)
-        com = np.average(self.traj.xyz[:, ligand_atoms, :], axis=1, weights=masses)
-        com_ref = com[0]
-        dist = np.linalg.norm(com - com_ref, axis=1)
+        dist_path = Path('trj_dist_lig.xvg')
+        dist_rows = []
+        with dist_path.open() as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(('@', '#')):
+                    continue
+                fields = stripped.split()
+                if len(fields) < 2:
+                    continue
+                try:
+                    dist_rows.append((float(fields[0]), float(fields[1])))
+                except ValueError:
+                    continue
+        dist_df = pd.DataFrame(dist_rows, columns=['time_ns', 'dist_nm'])
+        if dist_df.empty:
+            raise ValueError(f'No distance data found in {dist_path}')
+        max_frames = 1001
+        dist_indices = np.linspace(0, len(dist_df) - 1, max_frames, dtype=int) \
+            if len(dist_df) >= max_frames else np.arange(len(dist_df))
+        dist_df = dist_df.iloc[dist_indices]
 
         trace = go.Scatter(
-            x=self.traj.time / 1000,
-            y=dist,
+            x=dist_df['time_ns'],
+            y=dist_df['dist_nm'],
             mode='lines',
             line=dict(color='#B03060', width=1.1),
-            name='Distance (Å)',
-            hovertemplate='Distance=%{y:.2f} Å<extra></extra>')
+            name='Distance (nm)',
+            hovertemplate='Distance=%{y:.3f} nm<extra></extra>')
         
         trace.meta = {
             'axis_id': 'y2',
             'yaxis_params': dict(
-                title=dict(text='<b>Distance (Å)</b>',
+                title=dict(text='<b>Distance (nm)</b>',
                     font=dict(color='#B03060', size=12)),
                 # tickvals=tickvals, ticktext=ticktext, range=[0, upper],
                 tickfont=dict(color='#B03060'),
