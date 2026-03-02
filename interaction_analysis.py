@@ -268,6 +268,43 @@ class TimeSeriesAnalysis:
             f.write(html)
         print("Saved trj_occupancy.html")
 
+        png_fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            row_heights=[0.67, 0.33],
+            specs=[[{}], [{'secondary_y': True}]])
+        png_fig.add_trace(go.Heatmap(occupancy_trace.to_plotly_json()), row=1, col=1)
+        png_fig.add_trace(go.Scatter(rmsd_trace.to_plotly_json()), row=2, col=1, secondary_y=False)
+        png_fig.add_trace(go.Scatter(distance_trace.to_plotly_json()), row=2, col=1, secondary_y=True)
+
+        png_fig.update_layout(
+            height=750, width=1100,
+            margin=dict(l=100, r=70, t=65, b=65),
+            title=occupancy_trace.meta['layout']['title'],
+            plot_bgcolor='#FFFFFF',
+            paper_bgcolor='#FFFFFF',
+            showlegend=False,
+            hovermode='x unified',
+            hoverlabel=rmsd_trace.meta['layout']['hoverlabel'])
+        png_fig.update_xaxes(row=1, col=1, **occupancy_trace.meta['xaxis_params'])
+        png_fig.update_yaxes(row=1, col=1, **occupancy_trace.meta['yaxis_params'])
+        png_fig.update_xaxes(
+            row=2, col=1,
+            title_text=rmsd_trace.meta['layout']['xaxis_title'],
+            **rmsd_trace.meta['xaxis_params'])
+        png_fig.update_yaxes(
+            row=2, col=1, secondary_y=False,
+            tickmode='array', tickvals=rmsd_tickvals, range=[0, rmsd_upper],
+            **rmsd_trace.meta['yaxis_params'])
+        png_fig.update_yaxes(
+            row=2, col=1, secondary_y=True,
+            tickmode='array', tickvals=dist_tickvals, range=[0, dist_upper],
+            **distance_trace.meta['yaxis_params'])
+
+        png_fig.write_image(f'{self.int_dir}/../trj_occupancy.png', scale=3)
+        print("Saved trj_occupancy.png")
+
 
     def run(self):
         if not os.path.exists(self.int_dir):

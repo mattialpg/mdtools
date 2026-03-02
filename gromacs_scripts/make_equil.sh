@@ -99,8 +99,8 @@ if [ -n "$ligands" ]; then
     line=$(sed -n '/Include ligand topology/=' topol.top)
     
     for ligand in $ligands; do
-        echo -e "2 & a C*\ndel 0-2\nq" | gmx make_ndx -f "${ligand}.gro" -o "index_${ligand}.ndx"
-        gmx genrestr -f "${ligand}.gro" -n "index_${ligand}.ndx" -o "posre_${ligand}.itp" -fc 1000 1000 1000
+        echo -e "2 & a C*\ndel 0-2\nq" | gmx make_ndx -f "${ligand}.gro" -o "${ligand}.ndx"
+        gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 1000 1000 1000
     done
 
     ### ADD RESTRAINTS TO TOPOLOGY ###
@@ -275,19 +275,19 @@ gmx mdrun -deffnm npt_3 -bonded gpu -pme gpu
 
 echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 0 0 0
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "index_${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
+  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
 done
 gmx grompp -f npt.mdp -c npt_3.gro -t npt_3.cpt -r npt_3.gro -p topol.top -o npt_4.tpr -maxwarn 100
 gmx mdrun -deffnm npt_4 -bonded gpu -pme gpu
 
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "index_${ligand}.ndx" -o "posre_${ligand}.itp" -fc 10 10 10
+  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 10 10 10
 done
 gmx grompp -f npt.mdp -c npt_4.gro -t npt_4.cpt -r npt_4.gro -p topol.top -o npt_5.tpr -maxwarn 100
 gmx mdrun -deffnm npt_5 -bonded gpu -pme gpu
 
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "index_${ligand}.ndx" -o "posre_${ligand}.itp" -fc 0 0 0
+  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 0 0 0
 done
 gmx grompp -f npt.mdp -c npt_5.gro -t npt_5.cpt -r npt_5.gro -p topol.top -o npt_6.tpr -maxwarn 100
 gmx mdrun -deffnm npt_6 -bonded gpu -pme gpu
