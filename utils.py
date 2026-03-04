@@ -38,7 +38,7 @@ def ensure_dir(path: Path):
     return path
 
 def download_pdb(pdb_id, outdir="."):
-    pdb_id = pdb_id.lower()
+    # pdb_id = pdb_id.lower()
     url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
     outpath = Path(outdir) / f"{pdb_id}.pdb"
 

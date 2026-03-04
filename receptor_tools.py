@@ -1,9 +1,10 @@
 from pathlib import Path
 from pymol2 import PyMOL
 from itertools import pairwise
+import subprocess
 
-import logging
-logger = logging.getLogger(__name__)
+# import logging
+# logger = logging.getLogger(__name__)
 
 
 def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
@@ -28,27 +29,65 @@ def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
         gaps = [(a + 1, b - 1) for a, b in pairwise(sorted(set(residues))) if b - a > 1]
         if gaps:
             gap_text = ', '.join(f"{s}-{e}" if s != e else f"{s}" for s, e in gaps)
-            logger.warning(f"Missing residues in chain {chain}: {gap_text}")
+            print(f"\nMissing residues in chain {chain}: {gap_text}")
             return True
 
 
 def reconstruct_loops(pdb_id, chain='A'):
     """Simplified MODELLER-based loop reconstruction."""
-    from modeller import Environ, Model, Alignment, automodel
+    import os
+    from pathlib import Path
+    from urllib.request import urlopen
+    from Bio import SeqIO
+    from modeller import Environ, Model, Alignment
+    from modeller.automodel import automodel, assess
 
-    env = Environ()
-    model_code = f"{pdb_id}_{chain}"
     pdb_path = Path(f"{pdb_id}.pdb")
+    model_code = f"{pdb_id}.{chain}"
+    model_folder = Path("protein.modeller")
+    model_folder.mkdir(exist_ok=True)
+
+    # Dowload full fasta sequence
+    url = f"https://www.rcsb.org/fasta/chain/{pdb_id}.{chain}/download"
+    full_fasta = model_folder / f"{pdb_id}.fasta"
+    with urlopen(url) as r:
+        fasta_text = r.read().decode('utf-8')
+    Path(full_fasta).write_text(fasta_text)
+
+    # Convert to PIR format (.ali)
+    rec = next(SeqIO.parse(full_fasta, 'fasta'))
+    seq = str(rec.seq).replace('*', '').replace('X', 'X')
+    ali_path = model_folder / f"{pdb_id}.ali"
+    ali_text = (
+        f">P1;{model_code}\n"
+        f"sequence:{model_code}:::::::0.00:0.00\n"
+        f"{seq}*\n")
+    ali_path.write_text(ali_text)
+    subprocess.run(['cp', str(pdb_path), str(model_folder)], check=True)
+
+    # Load modeller
+    env = Environ()
     aln = Alignment(env)
     mdl = Model(env, file=pdb_path.stem, model_segment=(f"FIRST:{chain}", f"LAST:{chain}"))
-    aln.append_model(mdl, align_codes='template', atom_files=f"{pdb_path}")
-    aln.append(file=f"{pdb_id}.ali", align_codes=model_code)
+    aln.append_model(mdl, align_codes='template', atom_files=str(pdb_path))
+    aln.append(file=str(ali_path), align_codes=model_code)
+
+    # Align template to target sequence
     aln.align2d()
-    a = automodel.AutoModel(env, alnfile=f"template-{model_code}.ali",
-                            knowns='template', sequence=model_code)
+    alnfile = model_folder / f"template-{model_code}.ali"
+    aln.write(file=str(alnfile), alignment_format='PIR')
+
+    # Reconstruct loops
+    cwd = os.getcwd()
+    os.chdir(model_folder)
+    a = automodel(env, alnfile=alnfile.name, knowns='template',
+        sequence=model_code, assess_methods=(assess.DOPE,))
     a.starting_model = 1
     a.ending_model = 1
     a.make()
+    os.chdir(cwd)
 
-    logger.info(Path(f"bestmodel_{model_code}.pdb"))
-    
+    # Select best model
+    best = min(a.outputs, key=lambda x: x['DOPE score'])
+    best_model = best['name']
+    subprocess.run(['cp', str(model_folder / best_model), "protein.pdb"], check=True)

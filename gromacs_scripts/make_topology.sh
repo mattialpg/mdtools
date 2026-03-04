@@ -22,15 +22,12 @@ if [[ -z "${LIGAND_NAME:-}" || "${LIGAND_NAME}" == *.* || ! -s "${LIGAND_NAME}.s
   exit 1
 fi
 
-ligand_name="${LIGAND_NAME}"
-
 log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
 
-ligand_name="$1"
-output_name="${ligand_name}_amber"
-ligand_md_id=$(sed -n '2p' "${ligand_name}.sdf" | tr -d '\r' | xargs)
+output_name="${LIGAND_NAME}_amber"
+ligand_md_id=$(sed -n '2p' "${LIGAND_NAME}.sdf" | tr -d '\r' | xargs)
 
 cat > tleap_topology.in <<EOF
 source leaprc.gaff2
@@ -42,10 +39,10 @@ quit
 EOF
 
 log " >  Calculating charges..."
-antechamber -i "${ligand_name}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
+antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
 sed -i "s/\<MOL\>/${ligand_md_id}/g" "${output_name}.mol2"
-rm -rf "${ligand_name}.antechamber"; mkdir "${ligand_name}.antechamber"
-mv ANTECHAMBER_* ATOMTYPE* sqm.* "${ligand_name}.antechamber"
+rm -rf "${LIGAND_NAME}.antechamber"; mkdir "${LIGAND_NAME}.antechamber"
+mv ANTECHAMBER_* ATOMTYPE* sqm.* "${LIGAND_NAME}.antechamber"
 
 log " >  Generating Amber topology..."
 parmchk2 -i "${output_name}.mol2" -f mol2 -o "${output_name}.frcmod" -s gaff2
@@ -56,16 +53,16 @@ acpype -i "${output_name}.mol2" 2> >(grep -Ev \
   "OpenBabel|Open Babel|Cannot perform atom type translation|
   This Mol2 file is non-standard|Cannot interpret atom type|
   ==============================" >&2)
-rm -rf "${ligand_name}.acpype"; mv -f "${output_name}.acpype" "${ligand_name}.acpype"
-rename -f 's/_amber//' "${ligand_name}.acpype"/*
+rm -rf "${LIGAND_NAME}.acpype"; mv -f "${output_name}.acpype" "${LIGAND_NAME}.acpype"
+rename -f 's/_amber//' "${LIGAND_NAME}.acpype"/*
 
-awk '/\[ atomtypes \]/,/\[ moleculetype \]/ {if ($0 !~ /\[ moleculetype \]/) print}' "${ligand_name}.acpype/${ligand_name}_GMX.itp" > "${ligand_name}.prm"
-awk '/\[ moleculetype \]/,/\[ system \]/ {if ($0 !~ /\[ system \]/) print}' "${ligand_name}.acpype/${ligand_name}_GMX.itp" > "${ligand_name}.itp"
-sed -i "s/\b${output_name}\b/${ligand_md_id}/g" "${ligand_name}.itp"
+awk '/\[ atomtypes \]/,/\[ moleculetype \]/ {if ($0 !~ /\[ moleculetype \]/) print}' "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.prm"
+awk '/\[ moleculetype \]/,/\[ system \]/ {if ($0 !~ /\[ system \]/) print}' "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.itp"
+sed -i "s/\b${output_name}\b/${ligand_md_id}/g" "${LIGAND_NAME}.itp"
 
-mv -f tleap_topology.in "${output_name}".* leap.log "${ligand_name}.acpype/"
-cp "${ligand_name}.acpype/${ligand_name}_GMX.gro" "${ligand_name}.gro"
+mv -f tleap_topology.in "${output_name}".* leap.log "${LIGAND_NAME}.acpype/"
+cp "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.gro" "${LIGAND_NAME}.gro"
 
-obabel "${ligand_name}.sdf" -O "${ligand_name}.pdb" --writeconect
-sed -i "s/\<UNNAMED\>/${ligand_md_id}/g" "${ligand_name}.pdb"
-sed -i "s/\<UNL\>/${ligand_md_id}/g" "${ligand_name}.pdb"
+obabel "${LIGAND_NAME}.sdf" -O "${LIGAND_NAME}.pdb" --writeconect
+sed -i "s/\<UNNAMED\>/${ligand_md_id}/g" "${LIGAND_NAME}.pdb"
+sed -i "s/\<UNL\>/${ligand_md_id}/g" "${LIGAND_NAME}.pdb"

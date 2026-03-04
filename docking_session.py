@@ -28,8 +28,8 @@ class Preprocess:
         self.lig_new_id = 'LIG'
         self.lig_new_md_id = 'LIG'
         
-        self.pymol = '/home/mattia/.miniforge3/envs/fraglib/bin/pymol'
-        self.obabel = '/home/mattia/.miniforge3/envs/fraglib/bin/obabel'
+        self.pymol = '/home/mattia/.miniforge/envs/my-chem/bin/pymol'
+        self.obabel = '/home/mattia/.miniforge/envs/my-chem/bin/obabel'
         self.vina = '/home/mattia/.bin/smina.static'
 
 
@@ -126,12 +126,10 @@ class DockingSession:
         self.receptor_pdbqt = pdb_outfile.with_suffix('.pdbqt')
         
         flag = receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
-        # if flag:
-            # Do you want to reconstruct gaps?
-            # fix_loops = True
-
-        # if fix_loops:
-        #     receptor_tools.reconstruct_loops(pdb_infile, self.chain)
+        if flag:
+            answer = input("Do you want to reconstruct loops? [Y/n]: ").strip().lower()
+            if answer in ("", "y", "yes"):
+                receptor_tools.reconstruct_loops(self.receptor_id, self.chain)
 
         subprocess.run([self.obabel, str(pdb_outfile), '-xr', '-O', str(self.receptor_pdbqt)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -251,14 +249,22 @@ class RedockSession(DockingSession):
 
 if __name__ == '__main__':
     import argparse
+    import utils
 
     parser = argparse.ArgumentParser(description="Run a redocking workflow")
     parser.add_argument('--pdb', required=True, help="Protein PDB ID (e.g. 1ABC)")
+
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--lig_new', help="New ligand SMILES")
     group.add_argument('--lig_file', help="CSV file containing ligand SMILES")
+
     args = parser.parse_args()
 
+    workdir = Path('.').resolve()
+    pdb_file = workdir / f"{args.pdb}.pdb"
+
+    if not pdb_file.exists():
+        utils.download_pdb(args.pdb, workdir)
     prep = Preprocess(args)
     prep.choose_ligand()
     prep.get_box()
@@ -278,8 +284,6 @@ if __name__ == '__main__':
             workdir.mkdir(exist_ok=True)
             pdb_src = Path(f"{args.pdb}.pdb")
             shutil.copy2(pdb_src, workdir / pdb_src.name)
-        else:
-            workdir = Path('.').resolve()
 
         configs = prep.write_conf_file(workdir)
 
