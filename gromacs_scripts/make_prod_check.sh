@@ -4,8 +4,8 @@ set -euo pipefail
 # Parse command-line args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -length) LENGTH="$2"; shift 2 ;;
-    *) echo "Usage: $0 [-length NS]"; exit 1 ;;
+    -len) LENGTH="$2"; shift 2 ;;
+    *) echo "Usage: $0 [-len NS]"; exit 1 ;;
   esac
 done
 

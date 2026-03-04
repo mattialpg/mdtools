@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   ./postprocess.sh -i md_name [-o trj_name]
+#   ./postprocess.sh -i MDNAME [-o TRJNAME]
 
 # Parse command-line args
 while [[ $# -gt 0 ]]; do
@@ -10,16 +10,16 @@ while [[ $# -gt 0 ]]; do
     -i) MDNAME="$2"; shift 2 ;;
     -o) TRJNAME="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -i md_name [-o trj_name]"
+      echo "Usage: $0 -i MDNAME [-o TRJNAME]"
       exit 1
       ;;
-    *) echo "Usage: $0 -i md_name [-o trj_name]"; exit 1 ;;
+    *) echo "Usage: $0 -i MDNAME [-o TRJNAME]"; exit 1 ;;
   esac
 done
 
 if [[ -z "${MDNAME:-}" ]]; then
   echo "Error: missing -i"
-  echo "Usage: $0 -i md_name [-o trj_name]"
+  echo "Usage: $0 -i MDNAME [-o TRJNAME]"
   exit 1
 fi
 
@@ -61,4 +61,4 @@ gmx select -s ${TRJNAME}_strip.gro -n index.ndx -on pocket.ndx -select 'group "P
 sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
 gmx pairdist -f ${TRJNAME}_strip.xtc -s ${TRJNAME}_strip.gro -n pocket.ndx -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel 'group "LIG"' -type min
 
-python ~/mdtools/interaction_analysis.py --trj_name ${MDNAME}
+python ~/mdtools/interaction_analysis.py --TRJNAME ${MDNAME}

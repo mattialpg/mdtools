@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   ./make_extend.sh -mdname <mdname_name> -extend <extend_time_ns>
+#   ./make_extend.sh -mdname MDNAME -extend NS
 # Example:
 #   ./make_extend.sh -mdname md_100 -extend 200
 
@@ -11,16 +11,16 @@ while [[ $# -gt 0 ]]; do
     -mdname) MDNAME="$2"; shift 2 ;;
     -extend) EXTEND_NS="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"
+      echo "Usage: $0 -mdname MDNAME -extend NS"
       echo "Example: $0 -mdname md_100 -extend 200"
       exit 0
       ;;
-    *) echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"; exit 1 ;;
+    *) echo "Usage: $0 -mdname MDNAME -extend NS"; exit 1 ;;
   esac
 done
 
 if [[ -z "${MDNAME:-}" || -z "${EXTEND_NS:-}" ]]; then
-  echo "Usage: $0 -mdname <mdname_name> -extend <extend_time_ns>"
+  echo "Usage: $0 -mdname MDNAME -extend NS"
   exit 1
 fi
 

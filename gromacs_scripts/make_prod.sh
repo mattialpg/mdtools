@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # Usage:
-#   ./run.sh -length NS
+#   ./run.sh -len NS
 
 # Parse command-line args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -length) LENGTH="$2"; shift 2 ;;
+    -len) LENGTH="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -length NS"
+      echo "Usage: $0 -len NS"
       exit 0
       ;;
-    *) echo "Usage: $0 -length NS"; exit 1 ;;
+    *) echo "Usage: $0 -len NS"; exit 1 ;;
   esac
 done
 

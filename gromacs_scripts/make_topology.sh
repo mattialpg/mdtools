@@ -3,22 +3,22 @@ set -euo pipefail
 shopt -s nullglob
 
 # Usage:
-#   ./make_topology.sh -ligand LIGAND_NAME
+#   ./make_topology.sh -lig LIGAND_NAME
 
 # Parse command-line args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -ligand) LIGAND_NAME="$2"; shift 2 ;;
+    -lig) LIGAND_NAME="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -ligand LIGAND_NAME"
+      echo "Usage: $0 -lig LIGAND_NAME"
       exit 0
       ;;
-    *) echo "Usage: $0 -ligand LIGAND_NAME"; exit 1 ;;
+    *) echo "Usage: $0 -lig LIGAND_NAME"; exit 1 ;;
   esac
 done
 
 if [[ -z "${LIGAND_NAME:-}" || "${LIGAND_NAME}" == *.* || ! -s "${LIGAND_NAME}.sdf" ]]; then
-  echo "Usage: $0 -ligand LIGAND_NAME"
+  echo "Usage: $0 -lig LIGAND_NAME"
   exit 1
 fi
 
