@@ -101,6 +101,10 @@ class TimeSeriesAnalysis:
         ordered = corr.mean().sort_values(ascending=False).index
         df_pivot = df_pivot[ordered]
 
+        # Keep 12 most populated residues
+        top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
+        df_pivot = df_pivot[top_populated]
+
         # Build time vector scaled to number of frames
         total_time_ns = self.traj.time[-1] / 1000
         n_frames = len(df_pivot.index)
@@ -268,6 +272,7 @@ class TimeSeriesAnalysis:
             f.write(html)
         print("Saved trj_occupancy.html")
 
+        # Generate PNG layout
         png_fig = make_subplots(
             rows=2, cols=1,
             shared_xaxes=True,
@@ -279,7 +284,7 @@ class TimeSeriesAnalysis:
         png_fig.add_trace(go.Scatter(distance_trace.to_plotly_json()), row=2, col=1, secondary_y=True)
 
         png_fig.update_layout(
-            height=750, width=1100,
+            height=650, width=1100,
             margin=dict(l=100, r=70, t=65, b=65),
             title=occupancy_trace.meta['layout']['title'],
             plot_bgcolor='#FFFFFF',
@@ -289,18 +294,24 @@ class TimeSeriesAnalysis:
             hoverlabel=rmsd_trace.meta['layout']['hoverlabel'])
         png_fig.update_xaxes(row=1, col=1, **occupancy_trace.meta['xaxis_params'])
         png_fig.update_yaxes(row=1, col=1, **occupancy_trace.meta['yaxis_params'])
-        png_fig.update_xaxes(
-            row=2, col=1,
+        png_fig.update_xaxes(row=2, col=1,
             title_text=rmsd_trace.meta['layout']['xaxis_title'],
             **rmsd_trace.meta['xaxis_params'])
-        png_fig.update_yaxes(
-            row=2, col=1, secondary_y=False,
+        png_fig.update_yaxes(row=2, col=1, secondary_y=False,
             tickmode='array', tickvals=rmsd_tickvals, range=[0, rmsd_upper],
             **rmsd_trace.meta['yaxis_params'])
-        png_fig.update_yaxes(
-            row=2, col=1, secondary_y=True,
+        png_fig.update_yaxes(row=2, col=1, secondary_y=True,
             tickmode='array', tickvals=dist_tickvals, range=[0, dist_upper],
             **distance_trace.meta['yaxis_params'])
+
+        # Fit heatmap colorbar to the occupancy subplot
+        occ_domain = png_fig.layout.yaxis.domain
+        occ_center = (occ_domain[0] + occ_domain[1]) / 2
+        occ_height = (occ_domain[1] - occ_domain[0]) * 1.055
+        occ_xmax = png_fig.layout.xaxis.domain[1]
+        png_fig.update_traces(selector=dict(type='heatmap'),
+            colorbar=dict(x=occ_xmax, y=occ_center, len=occ_height,
+            yanchor='middle', thickness=18))
 
         png_fig.write_image(f'{self.int_dir}/../trj_occupancy.png', scale=3)
         print("Saved trj_occupancy.png")

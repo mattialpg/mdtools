@@ -61,4 +61,4 @@ gmx select -s ${TRJNAME}_strip.gro -n index.ndx -on pocket.ndx -select 'group "P
 sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
 gmx pairdist -f ${TRJNAME}_strip.xtc -s ${TRJNAME}_strip.gro -n pocket.ndx -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel 'group "LIG"' -type min
 
-python ~/mdtools/interaction_analysis.py --TRJNAME ${MDNAME}
+python ~/mdtools/interaction_analysis.py --trj_name ${MDNAME}
