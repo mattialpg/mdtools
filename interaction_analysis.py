@@ -287,7 +287,7 @@ class TimeSeriesAnalysis:
             height=650, width=1100,
             margin=dict(l=100, r=70, t=65, b=65),
             title=occupancy_trace.meta['layout']['title'],
-            plot_bgcolor='#FFFFFF',
+            plot_bgcolor=occupancy_trace.meta['layout']['plot_bgcolor'],
             paper_bgcolor='#FFFFFF',
             showlegend=False,
             hovermode='x unified',
@@ -303,6 +303,18 @@ class TimeSeriesAnalysis:
         png_fig.update_yaxes(row=2, col=1, secondary_y=True,
             tickmode='array', tickvals=dist_tickvals, range=[0, dist_upper],
             **distance_trace.meta['yaxis_params'])
+
+        # Restore white background for subplot 2
+        row2_xdomain = png_fig.layout.xaxis2.domain
+        row2_ydomain = png_fig.layout.yaxis2.domain
+        png_fig.add_shape(
+            type='rect',
+            xref='paper', yref='paper',
+            x0=row2_xdomain[0], x1=row2_xdomain[1],
+            y0=row2_ydomain[0], y1=row2_ydomain[1],
+            fillcolor='#FFFFFF',
+            line=dict(width=0),
+            layer='below')
 
         # Fit heatmap colorbar to the occupancy subplot
         occ_domain = png_fig.layout.yaxis.domain
