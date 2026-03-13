@@ -2,18 +2,14 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import os, sys, glob
-import re, yaml
+import yaml
 from pathlib import Path
-import asyncio, argparse
-import subprocess
+import argparse
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from itertools import combinations
-from collections import Counter
 import mdtraj as md
 
-import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
@@ -22,7 +18,6 @@ import utils, palettes
 
 # Import AIDDTools utils
 sys.path.append('/home/mattia/aiddtools')
-import fetching_tools as fetchtools
 import interaction_tools as inttools
 
 
@@ -39,31 +34,10 @@ class TimeSeriesAnalysis:
         self.int_dir = self.workdir / f'{self.ligand_name}.interactions'
   
         self.int_types = ['hydrophobic', 'hbond', 'waterbridge',
-             'saltbridge', 'pistacking', 'pication', 'halogen', 'metal']
-
-        self._ligand_atoms = None
-        self._ligand_masses = None
+            'saltbridge', 'pistacking', 'pication', 'halogen', 'metal']
 
         print("Loading trajectory...")
         self.traj = md.load_xtc(f'{self.trj_name}.xtc', top=f'{self.trj_name}.gro')
-
-
-    def _get_ligand_atoms(self):
-        if self._ligand_atoms is None:
-            self._ligand_atoms = self.traj.topology.select(f'resname {self.ligand_md_id}')
-            if not len(self._ligand_atoms):
-                raise ValueError(f"Ligand '{self.ligand_md_id}' not found")
-        return self._ligand_atoms
-
-
-    def _get_ligand_masses(self, ligand_atoms):
-        if self._ligand_masses is None:
-            masses = np.array([atom.element.mass for atom in\
-                self.traj.topology.atoms if atom.index in ligand_atoms])
-            masses /= masses.sum()
-            self._ligand_masses = masses
-        return self._ligand_masses
-
 
     def extract_frames(self):
         total_frames = self.traj.n_frames
@@ -94,7 +68,7 @@ class TimeSeriesAnalysis:
         df_lig['INT_PRIORITY'] = df_lig['INT_TYPE'].map(int_priority)
         df_lig = df_lig.sort_values('INT_PRIORITY')
 
-        # Keep one row per PDB/frame even when a frame has no valid RESID/INT_TYPE.
+        # Keep one row per frame even when there is no valid interaction
         df_pivot = df_lig.pivot_table(
             index='PDB', columns='RESID', values='INT_TYPE', aggfunc='first')
         df_pivot = df_pivot.reindex(all_pdb)
@@ -115,7 +89,7 @@ class TimeSeriesAnalysis:
             top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
             df_pivot = df_pivot[top_populated]
 
-        # Build time vector scaled to number of displayed frames.
+        # Build time vector scaled to number of displayed frames
         total_time_ns = self.traj.time[-1] / 1000
         n_frames = len(df_pivot.index)
         time_ns = np.linspace(0, total_time_ns, n_frames)
@@ -160,10 +134,10 @@ class TimeSeriesAnalysis:
         return trace
 
 
-    def make_rmsd_trace(self):
-        rmsd_path = Path('trj_rmsd_lig.xvg')
-        rmsd_rows = []
-        with rmsd_path.open() as handle:
+    def _read_xvg_series(self, xvg_path, y_col, empty_msg):
+        xvg_path = Path(xvg_path)
+        rows = []
+        with xvg_path.open() as handle:
             for line in handle:
                 stripped = line.strip()
                 if not stripped or stripped.startswith(('@', '#')):
@@ -172,24 +146,36 @@ class TimeSeriesAnalysis:
                 if len(fields) < 2:
                     continue
                 try:
-                    rmsd_rows.append((float(fields[0]), float(fields[1])))
+                    rows.append((float(fields[0]), float(fields[1])))
                 except ValueError:
                     continue
-        rmsd_df = pd.DataFrame(rmsd_rows, columns=['time_ns', 'rmsd_nm'])
-        if rmsd_df.empty:
-            raise ValueError(f'No RMSD data found in {rmsd_path}')
-        max_frames = 1001
-        rmsd_indices = np.linspace(0, len(rmsd_df) - 1, max_frames, dtype=int) \
-            if len(rmsd_df) >= max_frames else np.arange(len(rmsd_df))
-        rmsd_df = rmsd_df.iloc[rmsd_indices]
 
-        trace = go.Scatter(
-            x=rmsd_df['time_ns'],
-            y=rmsd_df['rmsd_nm'],
+        series_df = pd.DataFrame(rows, columns=['time_ns', y_col])
+        if series_df.empty:
+            raise ValueError(f'{empty_msg} {xvg_path}')
+
+        max_frames = 1001
+        indices = np.linspace(0, len(series_df) - 1, max_frames, dtype=int) \
+            if len(series_df) >= max_frames else np.arange(len(series_df))
+        return series_df.iloc[indices]
+
+
+    def _make_line_trace(self, series_df, y_col, color, name, hovertemplate):
+        return go.Scatter(
+            x=series_df['time_ns'],
+            y=series_df[y_col],
             mode='lines',
-            line=dict(color='#1A2228', width=1.1),
-            name='RMSD (nm)',
-            hovertemplate='RMSD=%{y:.3f} nm<extra></extra>')
+            line=dict(color=color, width=1.1),
+            name=name,
+            hovertemplate=hovertemplate)
+
+
+    def make_rmsd_trace(self):
+        rmsd_df = self._read_xvg_series(
+            'trj_rmsd_lig.xvg', 'rmsd_nm', 'No RMSD data found in')
+        trace = self._make_line_trace(
+            rmsd_df, 'rmsd_nm', '#1A2228', 'RMSD (nm)',
+            'RMSD=%{y:.3f} nm<extra></extra>')
 
         trace.meta = {
             'layout': dict(
@@ -216,35 +202,11 @@ class TimeSeriesAnalysis:
 
 
     def make_distance_trace(self):
-        dist_path = Path('trj_dist_lig.xvg')
-        dist_rows = []
-        with dist_path.open() as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped or stripped.startswith(('@', '#')):
-                    continue
-                fields = stripped.split()
-                if len(fields) < 2:
-                    continue
-                try:
-                    dist_rows.append((float(fields[0]), float(fields[1])))
-                except ValueError:
-                    continue
-        dist_df = pd.DataFrame(dist_rows, columns=['time_ns', 'dist_nm'])
-        if dist_df.empty:
-            raise ValueError(f'No distance data found in {dist_path}')
-        max_frames = 1001
-        dist_indices = np.linspace(0, len(dist_df) - 1, max_frames, dtype=int) \
-            if len(dist_df) >= max_frames else np.arange(len(dist_df))
-        dist_df = dist_df.iloc[dist_indices]
-
-        trace = go.Scatter(
-            x=dist_df['time_ns'],
-            y=dist_df['dist_nm'],
-            mode='lines',
-            line=dict(color='#B03060', width=1.1),
-            name='Distance (nm)',
-            hovertemplate='Distance=%{y:.3f} nm<extra></extra>')
+        dist_df = self._read_xvg_series(
+            'trj_dist_lig.xvg', 'dist_nm', 'No distance data found in')
+        trace = self._make_line_trace(
+            dist_df, 'dist_nm', '#B03060', 'Distance (nm)',
+            'Distance=%{y:.3f} nm<extra></extra>')
         
         trace.meta = {
             'axis_id': 'y2',
@@ -290,9 +252,10 @@ class TimeSeriesAnalysis:
 
         html = (pio.to_html(fig1, include_plotlyjs='cdn', full_html=False, div_id='occ') +
             pio.to_html(fig2, include_plotlyjs=False, full_html=False, div_id='lines'))
-        with open(f'{self.int_dir}/../trj_occupancy.html', 'w') as f:
+        html_path = self.int_dir.parent / 'trj_occupancy.html'
+        with html_path.open('w') as f:
             f.write(html)
-        print("Saved trj_occupancy.html")
+        print(f"Saved {html_path.name}")
 
         # Generate PNG layout
         png_fig = make_subplots(
@@ -347,21 +310,23 @@ class TimeSeriesAnalysis:
             colorbar=dict(x=occ_xmax, y=occ_center, len=occ_height,
             yanchor='middle', thickness=18))
 
-        png_fig.write_image(f'{self.int_dir}/../trj_occupancy.png', scale=3)
-        print("Saved trj_occupancy.png")
+        png_path = self.int_dir.parent / 'trj_occupancy.png'
+        png_fig.write_image(png_path, scale=3)
+        print(f"Saved {png_path.name}")
 
 
     def run(self):
-        if not os.path.exists(self.int_dir):
-            os.makedirs(self.int_dir)
+        int_csv = self.int_dir / 'interactions.csv'
+        if not self.int_dir.exists():
+            self.int_dir.mkdir(parents=True, exist_ok=True)
             self.extract_frames()
-        if not os.path.exists(self.int_dir / 'interactions.csv'):
-            pdb_files = glob.glob(f'{self.int_dir}/*.pdb')
+        if not int_csv.exists():
+            pdb_files = glob.glob(f"{self.int_dir}/*.pdb")
             df_int = inttools.analyse_pdb_files(pdb_files)
-            df_int.to_csv(self.int_dir / 'interactions.csv', index=False)
+            df_int.to_csv(int_csv, index=False)
         else:
-            print(f"Using file {self.int_dir}/interactions.csv...")
-            df_int = pd.read_csv(f'{self.int_dir}/interactions.csv')
+            print(f"Using file {int_csv}...")
+            df_int = pd.read_csv(int_csv)
 
         occupancy_trace = self.make_occupancy_trace(df_int)
         rmsd_trace = self.make_rmsd_trace()
@@ -369,147 +334,11 @@ class TimeSeriesAnalysis:
         self.plot_occupancy(occupancy_trace, rmsd_trace, distance_trace)
 
 
-class CrossTargetAnalysis:
-    def __init__(self, pdb_files):
-        self.pdb_files = pdb_files
-        self.pair_counts = Counter()
-        self.matrix = None
-
-    def analyse_receptors(self):
-        # Analise multiple receptors
-        df_int = inttools.analyse_pdb_files(self.pdb_files,
-            xml_outdir='.', pdb_outdir='.')
-
-        # Identify ligands of interest (LOI)
-        lig_cci = set()
-        for file in self.pdb_files:
-            ligs = inttools.get_ligands(file, select_loi=True)
-            lig_cci.update([x.split(':')[0] for x in ligs.keys()])
-        df_int = df_int[df_int['LIGNAME'].isin(lig_cci)]
-        df_int.to_csv('df_int.csv', index=False)
-
-        # Count co-occurrences across receptors
-        res_per_pdb = df_int.groupby('PDB')['RESID'].apply(set)
-        self.pair_counts = Counter()
-        for residues in res_per_pdb:
-            for r1, r2 in combinations(sorted(residues), 2):
-                self.pair_counts[(r1, r2)] += 1
-
-        # Build co-occurrence matrix
-        all_residues = sorted({r for pair in self.pair_counts for r in pair})
-        self.matrix = pd.DataFrame(0, index=all_residues, columns=all_residues)
-        for (r1, r2), count in self.pair_counts.items():
-            self.matrix.loc[r1, r2] = count
-            self.matrix.loc[r2, r1] = count
-
-        # Reorder matrix using weighted order
-        values = sorted(self.matrix.stack().unique(), reverse=True)
-        counts = pd.DataFrame({v: (self.matrix == v).sum(axis=1) for v in values})
-        counts['sort_key'] = list(counts.itertuples(index=False, name=None))
-        sorted_residues = counts.sort_values(by=values, ascending=False).index.tolist()
-        self.matrix = self.matrix.loc[sorted_residues, sorted_residues]
-
-        # svae matrix to CSV
-        self.matrix.to_csv('matrix.csv')
-
-
-    def plot_heatmap(self):
-
-        colorscale = [[float(p), c] for p, c in zip(
-            np.arange(0, 1.01, 0.25), palettes.palette_5)]
-        
-        fig = px.imshow(
-            self.matrix,
-            x=self.matrix.columns,
-            y=self.matrix.index,
-            color_continuous_scale=colorscale,
-            zmin=0,
-            zmax=self.matrix.to_numpy().max(),
-            aspect='auto')
-
-        fig.update_layout(
-            showlegend=False,
-            coloraxis_showscale=True,
-            xaxis=dict(
-                title='Residue',
-                tickangle=-90,
-                title_font=dict(size=16, weight='bold'),
-                showgrid=False, zeroline=False,
-                linecolor='black', mirror=True,
-                scaleanchor='y', constrain='domain'),
-            yaxis=dict(
-                title='Residue',
-                title_font=dict(size=16, weight='bold'),
-                showgrid=False, zeroline=False,
-                linecolor='black', mirror=True,),
-            # title=dict(
-            #     text="Antibiogram",
-                # x=0.5,  y=0.97, xanchor='center', yanchor='top',
-                # font=dict(size=22, weight='bold')),
-            coloraxis_colorbar=dict(
-                tickmode='array',
-                tickvals=list(range(int(self.matrix.to_numpy().max()) + 1)),
-                ticktext=[str(i) for i in range(int(self.matrix.to_numpy().max()) + 1)]),
-            height=650, width=750,
-            margin=dict(l=60, r=50, t=50, b=105))
-
-        fig.write_image('matrix.png', scale=5)
-        print("Saved matrix.png")
-
-
-    def find_top_residue_triplets(self):
-        # Compute residue totals
-        # residue_totals = self.matrix.sum(axis=1).astype(int).to_dict()
-
-        # Select all pairs with maximum co-occurrence frequency
-        max_score = max(self.pair_counts.values())
-        top_pairs = [pair for pair, score in self.pair_counts.items() if score == max_score]
-
-        # Combine those top pairs into unique triplets
-        triplets = set()
-        for p1, p2 in combinations(top_pairs, 2):
-            combo = set(p1 + p2)
-            if len(combo) == 3:  # valid triplet if exactly three unique residues
-                combo = sorted(combo, key=lambda x: int(x[3:]))  # sort numerically by residue number
-                # score = sum(residue_totals.get(x, 0) for x in combo)
-                triplets.add(tuple(combo))
-        
-        print("Top residue triplets:")
-        for triplet in triplets:
-            print('   ' + '-'.join(triplet))
-        return triplets
-    
-
-    def run(self):
-        self.analyse_receptors()
-        self.plot_heatmap()
-        self.find_top_residue_triplets()
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Protein-ligand analysis")
-    parser.add_argument('--analysis', choices=['time', 'targets', 'both'], default='time',
-        help="Select which analysis to run: time = time series only, targets = cross-target only, both = run both")
-    parser.add_argument('--trj_name', help="Trajectory file name for time series analysis")
-    parser.add_argument('--pdb_files', help="Path or pattern to PDB files for cross-target analysis (e.g. \"./*.pdb\")")
-    parser.add_argument('--cif_files', help="Path or pattern to CIF files for cross-target analysis (e.g. \"./*.cif\")")
+    parser = argparse.ArgumentParser(description="Protein-ligand time-series analysis")
+    parser.add_argument('--trj_name', required=True,
+        help="Trajectory file name for time series analysis")
     args = parser.parse_args()
 
-    if args.analysis in ['time', 'both']:
-        if not args.trj_name:
-            sys.exit("Provide --trj_name for time series analysis")
-        time_analysis = TimeSeriesAnalysis(trj_name=args.trj_name)
-        time_analysis.run()
-
-    if args.analysis in ['targets', 'both']:
-        pdb_files = glob.glob(args.pdb_files if args.pdb_files else '*.pdb')
-        if not pdb_files:
-            try:
-                cif_files = glob.glob(args.cif_files if args.cif_files else '*.cif')
-                for cif in cif_files:
-                    asyncio.run(fetchtools.download_pdbs_async(cif.split('.')[0]))
-            except:
-                sys.exit("No PDB files found for cross-target analysis")
-                
-        target_analysis = CrossTargetAnalysis(pdb_files)
-        target_analysis.run()
+    time_analysis = TimeSeriesAnalysis(trj_name=args.trj_name)
+    time_analysis.run()
