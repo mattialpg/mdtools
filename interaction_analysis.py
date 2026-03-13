@@ -86,39 +86,61 @@ class TimeSeriesAnalysis:
 
         int_priority = {name: idx for idx, name in enumerate(self.int_types)}
         df_lig = df_int[df_int['LIGNAME'] == self.ligand_md_id].copy()
+        # Preserve frame order from the source table (do this before priority sorting).
+        all_pdb = pd.Index(pd.unique(df_lig['PDB']), name='PDB')
+        df_lig['RESID'] = df_lig['RESID'].replace({'NA': np.nan, 'NANA': np.nan})
+        df_lig['INT_TYPE'] = df_lig['INT_TYPE'].where(
+            df_lig['INT_TYPE'].isin(int_priority), np.nan)
         df_lig['INT_PRIORITY'] = df_lig['INT_TYPE'].map(int_priority)
         df_lig = df_lig.sort_values('INT_PRIORITY')
 
-        df_pivot = df_lig.pivot_table(index='PDB', columns='RESID', values='INT_TYPE', aggfunc='first')
-        df_pivot = df_pivot.drop(columns=['NANA'], errors='ignore')
+        # Keep one row per PDB/frame even when a frame has no valid RESID/INT_TYPE.
+        df_pivot = df_lig.pivot_table(
+            index='PDB', columns='RESID', values='INT_TYPE', aggfunc='first')
+        df_pivot = df_pivot.reindex(all_pdb)
         df_pivot = df_pivot.replace(int_priority)
 
-        occupancy = df_pivot.notna().sum() / df_pivot.shape[0]
-        kept = occupancy[occupancy >= 0.05].index
-        df_pivot = df_pivot[kept]
+        if df_pivot.shape[1] > 0:
+            occupancy = df_pivot.notna().sum() / df_pivot.shape[0]
+            kept = occupancy[occupancy >= 0.05].index
+            if len(kept) == 0:
+                kept = occupancy.sort_values(ascending=False).index
+            df_pivot = df_pivot[kept]
 
-        corr = df_pivot.fillna(0).corr(method='pearson')
-        ordered = corr.mean().sort_values(ascending=False).index
-        df_pivot = df_pivot[ordered]
+            corr = df_pivot.fillna(0).corr(method='pearson')
+            ordered = corr.mean().sort_values(ascending=False).index
+            df_pivot = df_pivot[ordered]
 
-        # Keep 12 most populated residues
-        top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
-        df_pivot = df_pivot[top_populated]
+            # Keep 12 most populated residues
+            top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
+            df_pivot = df_pivot[top_populated]
 
-        # Build time vector scaled to number of frames
+        # Build time vector scaled to number of displayed frames.
         total_time_ns = self.traj.time[-1] / 1000
         n_frames = len(df_pivot.index)
         time_ns = np.linspace(0, total_time_ns, n_frames)
 
+        if df_pivot.shape[1] == 0:
+            y_vals = np.array(['No interactions'])
+            z_vals = np.full((1, n_frames), np.nan)
+        else:
+            y_vals = df_pivot.columns.to_numpy()
+            z_vals = df_pivot.to_numpy(dtype=float).T
+
+        customdata = np.full(z_vals.shape, 'NA', dtype=object)
+        valid = ~np.isnan(z_vals)
+        if valid.any():
+            int_labels = np.array(self.int_types, dtype=object)
+            customdata[valid] = int_labels[z_vals[valid].astype(int)]
+
         trace = go.Heatmap(
             x=time_ns, 
-            y=df_pivot.columns,
-            z=df_pivot.values.T,
+            y=y_vals,
+            z=z_vals,
             colorscale=dcolorsc,
             zmin=0, zmax=len(self.int_types),
             colorbar=colorbar_cfg, name='Occupancy',
-            customdata=np.vectorize(lambda i: self.int_types[int(i)]
-                if i == i else 'NA')(df_pivot.values.T),
+            customdata=customdata,
             hovertemplate="Time=%{x:.2f} ns<br>Residue=%{y}<br>Interaction=%{customdata}<extra></extra>")
         
         trace.meta = {
@@ -333,9 +355,10 @@ class TimeSeriesAnalysis:
         if not os.path.exists(self.int_dir):
             os.makedirs(self.int_dir)
             self.extract_frames()
+        if not os.path.exists(self.int_dir / 'interactions.csv'):
             pdb_files = glob.glob(f'{self.int_dir}/*.pdb')
             df_int = inttools.analyse_pdb_files(pdb_files)
-            df_int.to_csv(f'{self.int_dir}/interactions.csv', index=False)
+            df_int.to_csv(self.int_dir / 'interactions.csv', index=False)
         else:
             print(f"Using file {self.int_dir}/interactions.csv...")
             df_int = pd.read_csv(f'{self.int_dir}/interactions.csv')
