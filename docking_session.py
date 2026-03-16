@@ -1,4 +1,4 @@
-import os, sys, re
+import os, sys, re, logging
 import subprocess, shutil
 from pathlib import Path
 from ast import literal_eval
@@ -8,7 +8,7 @@ from rdkit.Chem import AllChem
 
 import yaml
 def tuple_as_literal(dumper, data):
-    """Serialises tuples as plain strings."""
+    """Serialize tuples as plain '(x, y, z)' strings in YAML."""
     return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
 yaml.SafeDumper.add_representer(tuple, tuple_as_literal)
 
@@ -20,12 +20,12 @@ import interaction_tools as inttools
 
 
 class Preprocess:
-    def __init__(self, args):
-        self.logger = utils.setup_logger()
+    def __init__(self, pdb_id, lig_new_id, lig_new_smiles):
+        self.logger = logging.getLogger(__name__)
 
-        self.receptor_id = args.pdb
-        self.lig_new_smiles = args.lig_new
-        self.lig_new_id = 'LIG'
+        self.receptor_id = pdb_id
+        self.lig_new_smiles = lig_new_smiles
+        self.lig_new_id = lig_new_id
         self.lig_new_md_id = 'LIG'
         
         self.pymol = '/home/mattia/.miniforge/envs/my-chem/bin/pymol'
@@ -40,9 +40,9 @@ class Preprocess:
             self.logger.warning(f"No ligands detected in {self.receptor_id}.pdb")
             return
 
-        self.logger.info("Detected ligands:")
+        print("Detected ligands:")
         for i, (lig_id, loi_status) in enumerate(ligands.items(), start=1):
-            mark = f"  ({loi_status})" if loi_status == 'Non-LOI' else ''
+            mark = f"  ({loi_status})" if loi_status == 'LOI' else ''
             print(f"   ({i}) Ligand {lig_id}{mark}")
 
         choice = int(input("\nSelect a ligand to replace: ").strip())
@@ -75,8 +75,9 @@ class Preprocess:
         self.box_size = tuple(float(x) for x in literal_eval(box_size))
 
 
-    def write_conf_file(self, workdir):
-        conf_file = workdir / 'config.yaml'
+    def write_config_file(self):
+        cwd = Path.cwd()
+        config_file = Path('config.yaml')
 
         configs = {
             'receptor_id': self.receptor_id,
@@ -95,7 +96,7 @@ class Preprocess:
             'exhaustiveness': 16,
             'num_modes': 8,
 
-            'workdir': str(workdir),
+            'workdir': str(cwd),
             'pymol': self.pymol,
             'obabel': self.obabel,
             'vina': self.vina,}
@@ -104,15 +105,15 @@ class Preprocess:
         config_text = yaml.safe_dump(configs, sort_keys=False)
         for key in ('ligand_id:', 'box_center:', 'energy_range:', 'workdir:'):
             config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
-        conf_file.write_text(config_text)
+        config_file.write_text(config_text)
 
-        self.logger.info(f"Configuration file written: {conf_file}")
+        self.logger.info(f"Configuration file written: {config_file}")
         return configs
     
 
-class DockingSession:
+class DockingPipeline:
     def __init__(self, configs):
-        self.logger = utils.setup_logger()
+        self.logger = logging.getLogger(__name__)
         for key, value in configs.items():
             setattr(self, key, value)
         self.workdir = Path(self.workdir)
@@ -125,11 +126,27 @@ class DockingSession:
         pdb_outfile = self.workdir / f"{self.receptor_name}.pdb"
         self.receptor_pdbqt = pdb_outfile.with_suffix('.pdbqt')
         
-        flag = receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
-        if flag:
-            answer = input("Do you want to reconstruct loops? [Y/n]: ").strip().lower()
-            if answer in ("", "y", "yes"):
-                receptor_tools.reconstruct_loops(self.receptor_id, self.chain)
+        has_missing_loops = receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
+        if has_missing_loops:
+            archive = Path('/home/mattia/modeller_archive')
+            modeller_dir_name = f"{self.receptor_id}_{self.chain}.modeller"
+            archived_model_dir = archive / modeller_dir_name
+            model_dir = self.workdir / f"{self.receptor_name}.modeller"
+
+            if archived_model_dir.is_dir():
+                if model_dir.exists():
+                    shutil.rmtree(model_dir)
+                shutil.copytree(archived_model_dir, model_dir)
+                print(f"\nCopied archived model to {model_dir}\n")
+
+                archived_protein = model_dir / "protein.pdb"
+                if archived_protein.exists():
+                    shutil.copy2(archived_protein, pdb_outfile)
+                    self.logger.info(f"Using archived reconstructed receptor: {archived_protein}")
+            else:
+                answer = input("Do you want to reconstruct loops? [Y/n]: ").strip().lower()
+                if answer in ("", "y", "yes"):
+                    receptor_tools.reconstruct_loops(self.receptor_id, self.chain)
 
         subprocess.run([self.obabel, str(pdb_outfile), '-xr', '-O', str(self.receptor_pdbqt)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -234,11 +251,13 @@ class DockingSession:
         for f in self.workdir.glob('*'):
             if f.is_file() and (f.suffix == '.pdbqt' or f.name.startswith(self.ligand_name)):
                 shutil.move(str(f), result_dir / f.name)
+        shutil.copy2(result_dir / f"{self.ligand_name}_docked_01.sdf",
+            self.workdir / f"{self.ligand_name}.sdf")
 
         self.logger.info(f"Docked files moved to folder: {result_dir}")
 
 
-class RedockSession(DockingSession):
+class RedockingPipeline(DockingPipeline):
     """Redocking workflow."""
     def run(self):
         self.prepare_receptor()
@@ -250,42 +269,39 @@ class RedockSession(DockingSession):
 if __name__ == '__main__':
     import argparse
     import utils
+    original_cwd = os.getcwd()
 
     parser = argparse.ArgumentParser(description="Run a redocking workflow")
-    parser.add_argument('--pdb', required=True, help="Protein PDB ID (e.g. 1ABC)")
-
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--lig_new', help="New ligand SMILES")
-    group.add_argument('--lig_file', help="CSV file containing ligand SMILES")
-
+    parser.add_argument('--pdb', help="Protein PDB ID (e.g. 1ABC)")
+    parser.add_argument('--lig_new', help="New ligand SMILES")
+    parser.add_argument('--lig_file', help="CSV file containing ligand SMILES")
+    parser.add_argument('--verbose', action='store_true', help="Enable verbose logging")
     args = parser.parse_args()
-
-    workdir = Path('.').resolve()
-    pdb_file = workdir / f"{args.pdb}.pdb"
-
-    if not pdb_file.exists():
-        utils.download_pdb(args.pdb, workdir)
-    prep = Preprocess(args)
-    prep.choose_ligand()
-    prep.get_box()
+    logger = utils.setup_logger(level=logging.INFO if args.verbose else logging.WARNING)
 
     if args.lig_new:
-        ligands_new = [('LIG', args.lig_new)]
-    else:
-        df = pd.read_csv(args.lig_file)
-        ligands_new = [(row['ID'], row['ISOSMILES']) for _, row in df.iterrows()]
-    
-    for lig_new_id, lig_new_smiles in ligands_new:
-        prep.lig_new_id = lig_new_id
-        prep.lig_new_smiles = lig_new_smiles
+        docking_jobs = [(args.pdb, 'LIG', args.lig_new)]
+    elif args.lig_file:
+        df = pd.read_csv(args.lig_file, sep=R'\t+', engine='python')
+        docking_jobs = [(row['RECEPTOR_ID'], row['LIGAND_ID'], row['LIGAND_SMILES']) for _, row in df.iterrows()]
 
-        if len(ligands_new) > 1:
-            workdir = Path(f"{args.pdb}_{lig_new_id}").resolve()
-            workdir.mkdir(exist_ok=True)
-            pdb_src = Path(f"{args.pdb}.pdb")
-            shutil.copy2(pdb_src, workdir / pdb_src.name)
+    for receptor_id, ligand_id, ligand_smiles in docking_jobs:
+        workdir = Path(f"{receptor_id}_{ligand_id}").resolve()
+        workdir.mkdir(exist_ok=True)
 
-        configs = prep.write_conf_file(workdir)
+        utils.download_pdb(receptor_id, workdir)
 
-        redock = RedockSession(configs)
-        redock.run()
+        os.chdir(workdir)
+        try:
+            prep = Preprocess(receptor_id, ligand_id, ligand_smiles)
+            prep.choose_ligand()
+            prep.get_box()
+            configs = prep.write_config_file()
+
+            redock = RedockingPipeline(configs)
+            redock.run()
+            print('\n\n')
+        except Exception as exc:
+            logger.error(f"Pipeline failed in {workdir}: {exc}")
+        finally:
+            os.chdir(original_cwd)

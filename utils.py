@@ -4,27 +4,30 @@ from pathlib import Path
 import logging, requests
 
 
-def setup_logger():
-    """Create a controlled root logger with consistent handlers."""
+def setup_logger(name=None, level=logging.INFO):
+    """Create a controlled logger with consistent handlers."""
     root = logging.getLogger()
-    root.handlers.clear()
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    if not getattr(root, "_mdtools_logger_configured", False):
+        root.handlers.clear()
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
-    # Console
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    root.addHandler(stream_handler)
+        # Console
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        root.addHandler(stream_handler)
 
-    # Fatal-on-error handler
-    def exit_on_error(record):
-        if record.levelno >= logging.ERROR:
-            sys.exit(1)
-    fatal_handler = logging.Handler()
-    fatal_handler.emit = exit_on_error
-    root.addHandler(fatal_handler)
+        # Fatal-on-error handler
+        def exit_on_error(record):
+            if record.levelno >= logging.ERROR:
+                sys.exit(1)
+        fatal_handler = logging.Handler()
+        fatal_handler.emit = exit_on_error
+        root.addHandler(fatal_handler)
+        root._mdtools_logger_configured = True
 
-    # Named logger for the manager
-    logger = logging.getLogger(__name__)
+    root.setLevel(level)
+    logger = logging.getLogger(name) if name else logging.getLogger("mdtools")
+    logger.setLevel(level)
 
     logging.getLogger("plip").setLevel(logging.WARNING)
     logging.getLogger("rdkit").setLevel(logging.WARNING)

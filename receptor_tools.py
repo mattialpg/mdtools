@@ -2,9 +2,9 @@ from pathlib import Path
 from pymol2 import PyMOL
 from itertools import pairwise
 import subprocess
+import logging
 
-# import logging
-# logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
@@ -29,7 +29,7 @@ def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
         gaps = [(a + 1, b - 1) for a, b in pairwise(sorted(set(residues))) if b - a > 1]
         if gaps:
             gap_text = ', '.join(f"{s}-{e}" if s != e else f"{s}" for s, e in gaps)
-            print(f"\nMissing residues in chain {chain}: {gap_text}")
+            logger.info(f"\nMissing residues in chain {chain}: {gap_text}")
             return True
 
 
