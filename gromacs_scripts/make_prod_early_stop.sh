@@ -2,10 +2,16 @@
 set -euo pipefail
 
 # Parse command-line args
+EARLYSTOP=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -len) LENGTH="$2"; shift 2 ;;
-    *) echo "Usage: $0 [-len NS]"; exit 1 ;;
+    --earlystop) EARLYSTOP=1; shift ;;
+    -h|--help)
+      echo "Usage: $0 -len NS [--earlystop]"
+      exit 0
+      ;;
+    *) echo "Usage: $0 -len NS [--earlystop]"; exit 1 ;;
   esac
 done
 
@@ -71,8 +77,12 @@ pcoupltype              = isotropic
 tau-p                   = 5.0
 ref-p                   = 1.0
 compressibility         = 4.5e-5
+EOF
 
-; Pull code to monitor Protein–LIG COM distance (no bias)
+if [[ "${EARLYSTOP}" -eq 1 ]]; then
+cat >> prod.mdp <<EOF
+
+; Pull code to monitor Protein-LIG COM distance (no bias)
 pull                    = yes
 pull-ngroups            = 2
 pull-group1-name        = Protein
@@ -82,9 +92,10 @@ pull-coord1-geometry    = distance
 pull-coord1-groups      = 1 2
 pull-coord1-dim         = Y Y Y
 pull-coord1-start       = yes
-pull-coord1-k 		      = 0
+pull-coord1-k           = 0
 pull-nstxout            = 5000    ; 10 ps
 EOF
+fi
 
 ### PRODUCTION ###
 log " > Running production dynamics (${LENGTH} ns)..."
@@ -92,23 +103,26 @@ gmx grompp -f prod.mdp -c npt.gro -t npt.cpt -p topol.top -n index.ndx -o "${OUT
 gmx mdrun -deffnm "${OUT_NAME}" -bonded gpu -pme gpu & MDPID=$!
 killed_by_distance=0
 
-while kill -0 "${MDPID}" 2>/dev/null; do
-  sleep "${MONITOR_INTERVAL}"
+if [[ "${EARLYSTOP}" -eq 1 ]]; then
+  while kill -0 "${MDPID}" 2>/dev/null; do
+    sleep "${MONITOR_INTERVAL}"
 
-  [[ -s "${OUT_NAME}_pullx.xvg" ]] || continue
+    [[ -s "${OUT_NAME}_pullx.xvg" ]] || continue
 
-  dist=$(awk '$1 !~ /^[@#]/ && $2+0==$2 {!first && (first=$2); last=$2} END{d=last-first; print d<0?-d:d}' "${OUT_NAME}_pullx.xvg")
-  log " > Protein-LIG distance: ${dist} nm"
-  if awk -v d="${dist}" -v c="${DIST_CUTOFF}" 'BEGIN{exit !((d+0) > c)}'; then
-    log " > Distance (${dist} nm) > ${DIST_CUTOFF} nm: stopping dynamics."
-    kill -TERM "${MDPID}" 2>/dev/null || true
-    killed_by_distance=1
-    break
-  fi
-done
+    dist=$(awk '$1 !~ /^[@#]/ && $2+0==$2 {!first && (first=$2); last=$2} END{d=last-first; print d<0?-d:d}' "${OUT_NAME}_pullx.xvg")
+    log " > Protein-LIG distance: ${dist} nm"
+    if awk -v d="${dist}" -v c="${DIST_CUTOFF}" 'BEGIN{exit !((d+0) > c)}'; then
+      log " > Distance (${dist} nm) > ${DIST_CUTOFF} nm: stopping dynamics."
+      kill -TERM "${MDPID}" 2>/dev/null || true
+      killed_by_distance=1
+      break
+    fi
+  done
+fi
 
 if [[ "${killed_by_distance}" -eq 1 ]]; then
   wait "${MDPID}" || true
 else
   wait "${MDPID}"
 fi
+
