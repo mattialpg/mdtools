@@ -32,9 +32,13 @@ class TimeSeriesAnalysis:
 
         self.workdir = Path(self.configs['workdir'])
         self.int_dir = self.workdir / f'{self.ligand_name}.interactions'
-  
         self.int_types = ['hydrophobic', 'hbond', 'waterbridge',
             'saltbridge', 'pistacking', 'pication', 'halogen', 'metal']
+
+        cwd = Path.cwd()
+        if cwd != self.workdir:
+            print('\033[1;31m\nWorkdir in config.yaml is different from current directory!\n\033[0m')
+            input("Press Enter to continue...\n")
 
         print("Loading trajectory...")
         self.traj = md.load_xtc(f'{self.trj_name}.xtc', top=f'{self.trj_name}.gro')
