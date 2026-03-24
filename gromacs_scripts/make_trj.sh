@@ -27,7 +27,14 @@ if [[ -z "${TRJNAME:-}" ]]; then
   TRJNAME="${MDNAME//md/trj}"
 fi
 
-LENGTH=${MDNAME#md_}
+LENGTH_TAG=${MDNAME#md_}
+if [[ "${LENGTH_TAG}" =~ ^([0-9]+([.][0-9]+)?) ]]; then
+  LENGTH_NS="${BASH_REMATCH[1]}"
+else
+  echo "Error: could not parse numeric length from MDNAME='${MDNAME}'"
+  echo "Expected names like md_100 or md_100_rep1"
+  exit 1
+fi
 
 log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
@@ -42,7 +49,7 @@ fi
 echo "!Water_and_ions" | gmx trjconv -f system.gro -s system.gro -o ${TRJNAME}_strip.gro -n index.ndx
 
 # Extract trajectory again
-echo "!Water_and_ions" | gmx trjconv -f ${MDNAME}.xtc -s system.gro -o ${TRJNAME}_whole.xtc -n index.ndx -pbc whole -dt ${LENGTH} -novel -ndec 2
+echo "!Water_and_ions" | gmx trjconv -f ${MDNAME}.xtc -s system.gro -o ${TRJNAME}_whole.xtc -n index.ndx -pbc whole -dt ${LENGTH_NS} -novel -ndec 2
 echo "!Water_and_ions" "!Water_and_ions" | gmx trjconv -f ${TRJNAME}_whole.xtc -s system.gro -o ${TRJNAME}_nojump.xtc -n index.ndx -pbc nojump -center -ndec 2
 echo "!Water_and_ions" "!Water_and_ions" "!Water_and_ions" | gmx trjconv -f ${TRJNAME}_nojump.xtc -s system.gro -o ${TRJNAME}_fit.xtc -n index.ndx -fit progressive -center -ndec 2 
 echo "Backbone" "!Water_and_ions" | gmx trjconv -s system.gro -f ${TRJNAME}_fit.xtc -o ${TRJNAME}_strip.xtc -n index.ndx -fit rot+trans -ndec 2
@@ -61,4 +68,4 @@ gmx select -s ${TRJNAME}_strip.gro -n index.ndx -on pocket.ndx -select 'group "P
 sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
 gmx pairdist -f ${TRJNAME}_strip.xtc -s ${TRJNAME}_strip.gro -n pocket.ndx -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel 'group "LIG"' -type min
 
-python ~/mdtools/interaction_analysis.py --trj_name ${TRJNAME}
+python ~/mdtools/interaction_analysis.py --trj_name ${TRJNAME}_strip

@@ -198,8 +198,7 @@ class TimeSeriesAnalysis:
                 unifiedhovertitle=dict(text='Time=%{x:.2f} ns')),
             'yaxis_params': dict(
                 title=dict(text='<b>RMSD (nm)</b>', font=dict(size=12)),
-                gridcolor='lightgrey',
-                showgrid=True,
+                gridcolor='lightgrey', showgrid=True,
                 zeroline=True, zerolinecolor='lightgrey',
                 showticklabels=True)}
         return trace
