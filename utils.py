@@ -82,7 +82,7 @@ def write_config_file(self_dict):
 
         'ligand_id': self_dict['lig_new_id'],
         'ligand_smiles': self_dict['lig_new_smiles'],
-        'ligand_name': self_dict['lig_name'],
+        'ligand_name': self_dict['ligand_name'],
         'ligand_md_id': self_dict['lig_new_md_id'],
 
         'box_center': self_dict['box_center'],

@@ -34,7 +34,7 @@ class Preprocess:
         self.lig_new_smiles = lig_new_smiles
         self.lig_new_id = lig_new_id
         self.lig_new_md_id = 'LIG'
-        self.lig_name = 'LIG'
+        self.ligand_name = 'ligand'
         self.receptor_name = 'protein'
 
         tool_paths = utils.get_tool_paths()
@@ -155,10 +155,32 @@ class DockingPipeline:
         template = Chem.MolFromMolFile(str(sdf_free), sanitize=True, removeHs=False)
         for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
             pose = Chem.MolFromMolFile(str(f), sanitize=True, removeHs=False)
-            match = pose.GetSubstructMatch(template)
-            pose = Chem.RenumberAtoms(pose, list(match))
-            fixed = AllChem.AssignBondOrdersFromTemplate(template, pose)
-            Chem.MolToMolFile(fixed, str(f.with_suffix('.sdf')))
+            if pose is None:
+                raise ValueError(f"Could not parse docked pose file: {f}")
+
+            fixed = None
+            if template is not None:
+                match = pose.GetSubstructMatch(template)
+                if match and len(match) == template.GetNumAtoms():
+                    try:
+                        reordered = Chem.RenumberAtoms(pose, list(match))
+                        fixed = AllChem.AssignBondOrdersFromTemplate(template, reordered)
+                    except Exception as exc:
+                        self.logger.warning(
+                            f"Could not transfer bond orders for {f.name}: {exc}"
+                        )
+                else:
+                    self.logger.warning(
+                        f"Template/pose atom mapping failed for {f.name}; "
+                        "keeping OpenBabel bond orders."
+                    )
+            else:
+                self.logger.warning(
+                    "Template ligand_free.sdf could not be parsed; "
+                    "keeping OpenBabel bond orders."
+                )
+
+            Chem.MolToMolFile(fixed if fixed is not None else pose, str(f.with_suffix('.sdf')))
             subprocess.run(["sed", "-i", f"2c\\{self.ligand_md_id}", str(f.with_suffix(".sdf"))],
                 check=True)
 
