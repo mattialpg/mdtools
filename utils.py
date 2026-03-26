@@ -2,6 +2,14 @@ import sys
 import numpy as np
 from pathlib import Path
 import logging, requests
+import yaml
+from ast import literal_eval
+
+
+TOOL_PATHS = {
+    "pymol": "/home/mattia/.miniforge/envs/my-chem/bin/pymol",
+    "obabel": "/home/mattia/.miniforge/envs/my-chem/bin/obabel",
+    "vina": "/home/mattia/.bin/smina.static",}
 
 
 def setup_logger(name=None, level=logging.INFO):
@@ -51,6 +59,76 @@ def download_pdb(pdb_id, outdir="."):
 
     outpath.write_text(response.text)
     return outpath
+
+
+def get_tool_paths(config_file=Path("config.yaml")):
+    tools = dict(TOOL_PATHS)
+    path = Path(config_file)
+    if path.exists():
+        configs = yaml.safe_load(path.read_text()) or {}
+        for key in ("pymol", "obabel", "vina"):
+            if configs.get(key):
+                tools[key] = configs[key]
+    return tools
+
+
+def write_config_file(self_dict):
+    cwd = Path.cwd()
+    config_file = Path('config.yaml')
+
+    configs = {
+        'receptor_id': self_dict['receptor_id'],
+        'receptor_name': self_dict['receptor_name'],
+
+        'ligand_id': self_dict['lig_new_id'],
+        'ligand_smiles': self_dict['lig_new_smiles'],
+        'ligand_name': self_dict['lig_name'],
+        'ligand_md_id': self_dict['lig_new_md_id'],
+
+        'box_center': self_dict['box_center'],
+        'box_size': self_dict['box_size'],
+
+        'energy_range': 4,
+        'exhaustiveness': 16,
+        'num_modes': 8,
+
+        'workdir': str(cwd),
+        'pymol': self_dict.get('pymol', TOOL_PATHS['pymol']),
+        'obabel': self_dict.get('obabel', TOOL_PATHS['obabel']),
+        'vina': self_dict.get('vina', TOOL_PATHS['vina'])}
+        
+    config_text = yaml.safe_dump(configs, sort_keys=False)
+    for key in ('ligand_id:', 'box_center:', 'energy_range:', 'workdir:'):
+        config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
+    config_file.write_text(config_text)
+
+    # self.logger.info(f"Configuration file written: {config_file}")
+    return configs
+
+
+def read_config_file(config_file=Path("config.yaml")):
+    configs = yaml.safe_load(Path(config_file).read_text())
+
+    receptor_id = configs.get("receptor_id")
+    if receptor_id:
+        parts = str(receptor_id).split(":")
+        configs["pdb_id"] = parts[0]
+        configs["chain"] = parts[1] if len(parts) > 1 else None
+        configs["domain"] = parts[2] if len(parts) > 2 else None
+
+    for key in ("box_center", "box_size"):
+        value = configs.get(key)
+        if isinstance(value, str):
+            try:
+                configs[key] = tuple(float(x) for x in literal_eval(value))
+            except Exception:
+                pass
+
+    for key, value in TOOL_PATHS.items():
+        configs.setdefault(key, value)
+
+    return configs
+
 
 def round_up_nice(x):
     """Round up to a 'nice' number, excluding 7 and 9 as leading digits.

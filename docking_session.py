@@ -12,7 +12,9 @@ def tuple_as_literal(dumper, data):
     return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
 yaml.SafeDumper.add_representer(tuple, tuple_as_literal)
 
-import receptor_tools, utils
+import receptor_tools
+import ligand_tools
+import utils
 
 # Import AIDDTools utils
 sys.path.append('/home/mattia/aiddtools')
@@ -20,25 +22,34 @@ import interaction_tools as inttools
 
 
 class Preprocess:
-    def __init__(self, pdb_id, lig_new_id, lig_new_smiles):
+    def __init__(self, receptor_id, lig_new_id, lig_new_smiles):
         self.logger = logging.getLogger(__name__)
 
-        self.receptor_id = pdb_id
+        self.receptor_id = receptor_id
+        parts = receptor_id.split(':')
+        self.pdb_id = parts[0]
+        self.chain = parts[1] if len(parts) > 1 else None
+        self.domain = parts[2] if len(parts) > 2 else None
+
         self.lig_new_smiles = lig_new_smiles
         self.lig_new_id = lig_new_id
         self.lig_new_md_id = 'LIG'
-        
-        self.pymol = '/home/mattia/.miniforge/envs/my-chem/bin/pymol'
-        self.obabel = '/home/mattia/.miniforge/envs/my-chem/bin/obabel'
-        self.vina = '/home/mattia/.bin/smina.static'
+        self.lig_name = 'LIG'
+        self.receptor_name = 'protein'
+
+        tool_paths = utils.get_tool_paths()
+        self.pymol = tool_paths['pymol']
+        self.obabel = tool_paths['obabel']
+        self.vina = tool_paths['vina']
 
 
     def choose_ligand(self):
-        ligands = inttools.get_ligands(f"{self.receptor_id}.pdb")
-
+        ligands = inttools.get_ligands(f"{self.pdb_id}.pdb")
         if not ligands:
-            self.logger.warning(f"No ligands detected in {self.receptor_id}.pdb")
+            self.logger.warning(f"No ligands detected in {self.pdb_id}.pdb")
             return
+        if self.chain is not None:
+            ligands = {k:v for k, v in ligands.items() if k.split(':')[1] == self.chain}
 
         print("Detected ligands:")
         for i, (lig_id, loi_status) in enumerate(ligands.items(), start=1):
@@ -48,17 +59,16 @@ class Preprocess:
         choice = int(input("\nSelect a ligand to replace: ").strip())
 
         keys = list(ligands.keys())
-        selected_key = keys[choice - 1]
-        resname, chain, _ = selected_key.split(':')
-
-        self.lig_orig_id = resname
-        self.chain = chain
+        self.lig_orig_id, self.chain, _ = keys[choice - 1].split(':')
+        self.receptor_id = f"{self.pdb_id}:{self.chain}"
+        if self.domain is not None:
+            self.receptor_id += f":{self.domain}"
 
 
     def get_box(self):
         pymol_commands = (
             f"run /home/mattia/mdtools/pymol_scripts/draw_bounding_box.py;"
-            f"load {self.receptor_id}.pdb, prot;"
+            f"load {self.pdb_id}.pdb, prot;"
             f"select lig, chain {self.chain} and resn {self.lig_orig_id};"
             f"draw_bounding_box lig")
         result = subprocess.run([self.pymol, '-cqd', pymol_commands],
@@ -73,99 +83,22 @@ class Preprocess:
 
         self.box_center = tuple(float(x) for x in literal_eval(box_center))
         self.box_size = tuple(float(x) for x in literal_eval(box_size))
-
-
-    def write_config_file(self):
-        cwd = Path.cwd()
-        config_file = Path('config.yaml')
-
-        configs = {
-            'receptor_id': self.receptor_id,
-            'receptor_name': 'protein',
-            'chain': self.chain,
-
-            'ligand_id': self.lig_new_id,
-            'ligand_smiles': self.lig_new_smiles,
-            'ligand_name': 'ligand',
-            'ligand_md_id': self.lig_new_md_id,
-
-            'box_center': self.box_center,
-            'box_size': self.box_size,
-
-            'energy_range': 4,
-            'exhaustiveness': 16,
-            'num_modes': 8,
-
-            'workdir': str(cwd),
-            'pymol': self.pymol,
-            'obabel': self.obabel,
-            'vina': self.vina,}
-
-        # Export to config file
-        config_text = yaml.safe_dump(configs, sort_keys=False)
-        for key in ('ligand_id:', 'box_center:', 'energy_range:', 'workdir:'):
-            config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
-        config_file.write_text(config_text)
-
-        self.logger.info(f"Configuration file written: {config_file}")
-        return configs
     
 
 class DockingPipeline:
-    def __init__(self, configs):
+    def __init__(self, config_file=Path("config.yaml")):
         self.logger = logging.getLogger(__name__)
-        for key, value in configs.items():
+
+        self.configs = utils.read_config_file(config_file)
+        for key, value in self.configs.items():
             setattr(self, key, value)
         self.workdir = Path(self.workdir)
 
-
-    def prepare_receptor(self, fix_loops=False):
-        self.logger.info(f"Preparing receptor for {self.receptor_id} (chain {self.chain})")
-
-        pdb_infile = self.workdir / f"{self.receptor_id}.pdb"
-        pdb_outfile = self.workdir / f"{self.receptor_name}.pdb"
-        self.receptor_pdbqt = pdb_outfile.with_suffix('.pdbqt')
-        
-        has_missing_loops = receptor_tools.extract_receptor(pdb_infile, pdb_outfile, self.chain)
-        if has_missing_loops:
-            archive = Path('/home/mattia/modeller_archive')
-            modeller_dir_name = f"{self.receptor_id}_{self.chain}.modeller"
-            archived_model_dir = archive / modeller_dir_name
-            model_dir = self.workdir / f"{self.receptor_name}.modeller"
-
-            if archived_model_dir.is_dir():
-                if model_dir.exists():
-                    shutil.rmtree(model_dir)
-                shutil.copytree(archived_model_dir, model_dir)
-                print(f"\nCopied archived model to {model_dir}\n")
-
-                archived_protein = model_dir / "protein.pdb"
-                if archived_protein.exists():
-                    shutil.copy2(archived_protein, pdb_outfile)
-                    self.logger.info(f"Using archived reconstructed receptor: {archived_protein}")
-            else:
-                answer = input("Do you want to reconstruct loops? [Y/n]: ").strip().lower()
-                if answer in ("", "y", "yes"):
-                    receptor_tools.reconstruct_loops(self.receptor_id, self.chain)
-
-        subprocess.run([self.obabel, str(pdb_outfile), '-xr', '-O', str(self.receptor_pdbqt)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
+    def prepare_receptor(self):
+        self.receptor_pdbqt = receptor_tools.prepare_receptor(self.configs)
 
     def prepare_ligand(self):
-        self.logger.info(f"Preparing ligand {self.ligand_id}")
-        sdf_free = self.workdir / f"{self.ligand_name}_free.sdf"
-        pdbqt_free = self.workdir / f"{self.ligand_name}_free.pdbqt"
-
-        # Generate 3D ligand from SMILES
-        subprocess.run([self.obabel, f"-:{self.ligand_smiles}", '-O', str(sdf_free), '--gen3d'],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        # Convert SDF to PDBQT
-        subprocess.run([self.obabel, str(sdf_free), '-O', str(pdbqt_free)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.logger.info(f"Ligand prepared: {pdbqt_free}")
-        self.ligand_pdbqt = pdbqt_free
+        self.ligand_pdbqt = ligand_tools.prepare_ligand(self.configs)
 
 
     def dock(self, output_prefix='docked'):
@@ -257,22 +190,13 @@ class DockingPipeline:
         self.logger.info(f"Docked files moved to folder: {result_dir}")
 
 
-class RedockingPipeline(DockingPipeline):
-    """Redocking workflow."""
-    def run(self):
-        self.prepare_receptor()
-        self.prepare_ligand()
-        self.dock()
-        self.postprocess()
-
-
 if __name__ == '__main__':
     import argparse
     import utils
     original_cwd = os.getcwd()
 
     parser = argparse.ArgumentParser(description="Run a redocking workflow")
-    parser.add_argument('--pdb', help="Protein PDB ID (e.g. 1ABC)")
+    parser.add_argument('--pdb', help="Receptor ID (e.g. 1ABC or 1ABC:A:45-210)")
     parser.add_argument('--lig_new', help="New ligand SMILES")
     parser.add_argument('--lig_file', help="CSV file containing ligand SMILES")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose logging")
@@ -283,23 +207,31 @@ if __name__ == '__main__':
         docking_jobs = [(args.pdb, 'LIG', args.lig_new)]
     elif args.lig_file:
         df = pd.read_csv(args.lig_file, sep=R'\t+', engine='python')
-        docking_jobs = [(row['RECEPTOR_ID'], row['LIGAND_ID'], row['LIGAND_SMILES']) for _, row in df.iterrows()]
+        docking_jobs = [(row['RECEPTOR_ID'], row['LIGAND_ID'], row['LIGAND_SMILES'])
+            for _, row in df.iterrows()]
 
     for receptor_id, ligand_id, ligand_smiles in docking_jobs:
-        workdir = Path(f"{receptor_id}_{ligand_id}").resolve()
+        pdb_id = receptor_id.split(':')[0]
+
+        workdir = Path(f"{pdb_id}_{ligand_id}").resolve()
         workdir.mkdir(exist_ok=True)
 
-        utils.download_pdb(receptor_id, workdir)
+        utils.download_pdb(pdb_id, workdir)
 
         os.chdir(workdir)
         try:
             prep = Preprocess(receptor_id, ligand_id, ligand_smiles)
             prep.choose_ligand()
             prep.get_box()
-            configs = prep.write_config_file()
+            config_file = Path("config.yaml")
+            utils.write_config_file(dict(prep.__dict__))
 
-            redock = RedockingPipeline(configs)
-            redock.run()
+            # Redock pipeline
+            dock = DockingPipeline(config_file)
+            dock.prepare_receptor()
+            dock.prepare_ligand()
+            dock.dock()
+            dock.postprocess()
             print('\n\n')
         except Exception as exc:
             logger.error(f"Pipeline failed in {workdir}: {exc}")

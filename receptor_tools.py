@@ -1,93 +1,163 @@
 from pathlib import Path
-from pymol2 import PyMOL
 from itertools import pairwise
+import os
+import re
+import shutil
 import subprocess
-import logging
+from urllib.request import urlopen
 
-logger = logging.getLogger(__name__)
+from Bio import SeqIO
+from modeller import Environ, Model, Alignment
+from modeller.automodel import LoopModel, assess, refine
+from pymol2 import PyMOL
 
 
-def extract_receptor(pdb_infile, pdb_outfile, chain='A'):
-    """Extract a polymer chain from a PDB/CIF using PyMOL."""
+ARCHIVE_DIR = Path("/home/mattia/modeller_archive")
+MODEL_DIR_NAME = "protein.modeller"
+
+
+def _copy_archived_model(archived_model_dir, model_dir, pdb_outfile):
+    if not archived_model_dir.is_dir():
+        return False
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+    shutil.copytree(archived_model_dir, model_dir)
+    print(f"\nCopied archived model to {model_dir}\n")
+
+    archived_protein = model_dir / "protein.pdb"
+    if archived_protein.exists():
+        shutil.copy2(archived_protein, pdb_outfile)
+        print(f"Using archived reconstructed receptor: {archived_protein}")
+    return True
+
+
+def _archive_new_model(model_dir, archived_model_dir):
+    if not model_dir.exists():
+        return
+    archived_model_dir.parent.mkdir(parents=True, exist_ok=True)
+    if archived_model_dir.exists():
+        shutil.rmtree(archived_model_dir)
+    shutil.copytree(model_dir, archived_model_dir)
+    print(f"Archived reconstructed model to: {archived_model_dir}")
+
+
+def extract_receptor(pdb_infile, pdb_outfile, chain="A", domain=None):
+    """Extract polymer selection and report whether sequence gaps are present."""
     #TODO: adjust residue numbering offset in protein
-    
+    #TODO: check enginerised residues
+
     pdb_path = Path(pdb_infile).resolve()
     out = Path(pdb_outfile).resolve()
-
     if not pdb_path.exists():
-        logger.error(f"PDB file not found: {pdb_path}")
+        print(f"PDB file not found: {pdb_path}")
 
     with PyMOL() as pm:
-        pm.cmd.load(str(pdb_path), 'prot')
-        pm.cmd.select('sel', f"polymer and chain {chain}")
-        pm.cmd.save(str(out), 'sel')
+        pm.cmd.load(str(pdb_path), "prot")
+        sel_string = f"polymer and chain {chain}"
+        if domain:
+            sel_string += f" and resi {domain}"
+        pm.cmd.select("sel", sel_string)
+        pm.cmd.save(str(out), "sel")
 
-        # Check for residue gaps
         residues = []
-        pm.cmd.iterate('sel and name CA', 'residues.append(resv)',
-            space={'residues': residues})
+        pm.cmd.iterate("sel and name CA", "residues.append(resv)", space={"residues": residues})
         gaps = [(a + 1, b - 1) for a, b in pairwise(sorted(set(residues))) if b - a > 1]
         if gaps:
-            gap_text = ', '.join(f"{s}-{e}" if s != e else f"{s}" for s, e in gaps)
-            logger.info(f"\nMissing residues in chain {chain}: {gap_text}")
+            gap_text = ", ".join(f"{s}-{e}" if s != e else f"{s}" for s, e in gaps)
+            print(f"\nMissing residues in chain {chain}: {gap_text}")
             return True
+    return False
 
 
-def reconstruct_loops(pdb_id, chain='A'):
-    """Simplified MODELLER-based loop reconstruction."""
-    import os
-    from pathlib import Path
-    from urllib.request import urlopen
-    from Bio import SeqIO
-    from modeller import Environ, Model, Alignment
-    from modeller.automodel import automodel, assess
-
+def reconstruct_loops(pdb_id, chain="A", domain=None):
+    """Run MODELLER loop reconstruction and write best model as protein.pdb in CWD."""
     pdb_path = Path(f"{pdb_id}.pdb")
-    model_code = f"{pdb_id}.{chain}"
-    model_folder = Path("protein.modeller")
-    model_folder.mkdir(exist_ok=True)
+    model_dir = Path(MODEL_DIR_NAME)
+    model_dir.mkdir(exist_ok=True)
 
-    # Dowload full fasta sequence
-    url = f"https://www.rcsb.org/fasta/chain/{pdb_id}.{chain}/download"
-    full_fasta = model_folder / f"{pdb_id}.fasta"
-    with urlopen(url) as r:
-        fasta_text = r.read().decode('utf-8')
-    Path(full_fasta).write_text(fasta_text)
+    full_fasta = model_dir / f"{pdb_id}.fasta"
+    with urlopen(f"https://www.rcsb.org/fasta/chain/{pdb_id}.{chain}/download") as response:
+        full_fasta.write_text(response.read().decode("utf-8"))
 
-    # Convert to PIR format (.ali)
-    rec = next(SeqIO.parse(full_fasta, 'fasta'))
-    seq = str(rec.seq).replace('*', '').replace('X', 'X')
-    ali_path = model_folder / f"{pdb_id}.ali"
-    ali_text = (
-        f">P1;{model_code}\n"
-        f"sequence:{model_code}:::::::0.00:0.00\n"
+    start = end = None
+    if domain:
+        match = re.fullmatch(R"\s*(\d+)\s*-\s*(\d+)\s*", str(domain))
+        start, end = map(int, match.groups())
+    rec = next(SeqIO.parse(full_fasta, "fasta"))
+    seq = str(rec.seq).replace("*", "")
+    if start is not None:
+        seq = seq[start - 1 : end]
+
+    ali_path = model_dir / f"{pdb_id}.ali"
+    ali_path.write_text(">P1;target\n"
+        "sequence:target:::::::0.00:0.00\n"
         f"{seq}*\n")
-    ali_path.write_text(ali_text)
-    subprocess.run(['cp', str(pdb_path), str(model_folder)], check=True)
 
-    # Load modeller
+    shutil.copy(str(pdb_path), str(model_dir / pdb_path.name))
+
     env = Environ()
     aln = Alignment(env)
-    mdl = Model(env, file=pdb_path.stem, model_segment=(f"FIRST:{chain}", f"LAST:{chain}"))
-    aln.append_model(mdl, align_codes='template', atom_files=str(pdb_path))
-    aln.append(file=str(ali_path), align_codes=model_code)
-
-    # Align template to target sequence
+    if start is not None:
+        model_segment = (f"{start}:{chain}", f"{end}:{chain}")
+    else:
+        model_segment = (f"FIRST:{chain}", f"LAST:{chain}")
+    mdl = Model(env, file=pdb_path.stem, model_segment=model_segment)
+    aln.append_model(mdl, align_codes="template", atom_files=str(pdb_path))
+    aln.append(file=str(ali_path), align_codes="target")
     aln.align2d()
-    alnfile = model_folder / f"template-{model_code}.ali"
-    aln.write(file=str(alnfile), alignment_format='PIR')
 
-    # Reconstruct loops
+    alnfile = model_dir / "template-target.ali"
+    aln.write(file=str(alnfile), alignment_format="PIR")
+
     cwd = os.getcwd()
-    os.chdir(model_folder)
-    a = automodel(env, alnfile=alnfile.name, knowns='template',
-        sequence=model_code, assess_methods=(assess.DOPE,))
-    a.starting_model = 1
-    a.ending_model = 1
-    a.make()
-    os.chdir(cwd)
+    os.chdir(model_dir)
+    try:
+        modeler = LoopModel(env, alnfile=alnfile.name,
+            knowns="template", sequence="target",
+            assess_methods=(assess.DOPE,))
+        modeler.starting_model = 1
+        modeler.ending_model = 1
+        modeler.loop.starting_model = 1
+        modeler.loop.ending_model = 1
+        modeler.loop.md_level = refine.slow
+        modeler.make()
+    finally:
+        os.chdir(cwd)
 
-    # Select best model
-    best = min(a.outputs, key=lambda x: x['DOPE score'])
-    best_model = best['name']
-    subprocess.run(['cp', str(model_folder / best_model), "protein.pdb"], check=True)
+    valid_models = [item for item in modeler.outputs if item.get("failure") is None]
+    if not valid_models:
+        raise RuntimeError("MODELLER did not produce any successful models.")
+    best = min(valid_models, key=lambda item: item["DOPE score"])
+    shutil.copy(str(model_dir / best["name"]), "protein.pdb")
+
+
+def prepare_receptor(configs, archive_dir=ARCHIVE_DIR):
+    """Prepare receptor PDB/PDBQT using archive-or-reconstruct logic."""
+    workdir = Path(configs["workdir"])
+    print(f"Preparing receptor for {configs['receptor_id']}")
+    
+    parts = configs["receptor_id"].split(":")
+    pdb_id, chain = parts[0], parts[1]
+    domain = parts[2] if len(parts) > 2 else None
+
+    pdb_infile = workdir / f"{pdb_id}.pdb"
+    pdb_outfile = workdir / f"{configs['receptor_name']}.pdb"
+    receptor_pdbqt = pdb_outfile.with_suffix(".pdbqt")
+
+    has_missing_loops = extract_receptor(pdb_infile, pdb_outfile, chain, domain)
+    if has_missing_loops:
+        modeller_dir_name = f"{configs['receptor_id'].replace(':', '_')}.modeller"
+        archived_model_dir = Path(archive_dir) / modeller_dir_name
+        model_dir = workdir / MODEL_DIR_NAME
+
+        used_archive = _copy_archived_model(archived_model_dir, model_dir, pdb_outfile)
+        if not used_archive:
+            answer = input("Do you want to reconstruct loops? [Y/n]: ").strip().lower()
+            if answer in ("", "y", "yes"):
+                reconstruct_loops(pdb_id, chain, domain)
+                _archive_new_model(model_dir, archived_model_dir)
+
+    subprocess.run([configs["obabel"], str(pdb_outfile), "-xr", "-O", str(receptor_pdbqt)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return receptor_pdbqt
+
