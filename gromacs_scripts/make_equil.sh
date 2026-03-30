@@ -276,19 +276,19 @@ gmx mdrun -deffnm npt_3 -bonded auto -pme auto -update auto
 
 echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 0 0 0
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
+    gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
 done
 gmx grompp -f npt.mdp -c npt_3.gro -t npt_3.cpt -r npt_3.gro -p topol.top -o npt_4.tpr -maxwarn 100
 gmx mdrun -deffnm npt_4 -bonded auto -pme auto -update auto
 
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 10 10 10
+    gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 10 10 10
 done
 gmx grompp -f npt.mdp -c npt_4.gro -t npt_4.cpt -r npt_4.gro -p topol.top -o npt_5.tpr -maxwarn 100
 gmx mdrun -deffnm npt_5 -bonded auto -pme auto -update auto
 
 for ligand in $ligands; do
-  gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 0 0 0
+    gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 0 0 0
 done
 gmx grompp -f npt.mdp -c npt_5.gro -t npt_5.cpt -r npt_5.gro -p topol.top -o npt_6.tpr -maxwarn 100
 gmx mdrun -deffnm npt_6 -bonded auto -pme auto -update auto
