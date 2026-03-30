@@ -93,35 +93,6 @@ echo 'SOL' | gmx genion -s ions.tpr -o system.gro -p topol.top -pname NA -nname 
 sleep 2
 rm complex_box.gro complex_solv.gro
 
-if [ -n "$ligands" ]; then
-    ### CREATE LIGAND RESTRAINTS ###
-    log " >  Creating ligand restraints..."
-    line=$(sed -n '/Include ligand topology/=' topol.top)
-    
-    for ligand in $ligands; do
-        echo -e "2 & a C*\ndel 0-2\nq" | gmx make_ndx -f "${ligand}.gro" -o "${ligand}.ndx"
-        gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 1000 1000 1000
-    done
-
-    ### ADD RESTRAINTS TO TOPOLOGY ###
-    line=$(sed -n '/Include ligand topology/=' topol.top)
-    {
-        echo ""
-        echo "; Ligand position restraints"
-        echo "#ifdef POSRES_LIG"
-        for ligand in $ligands; do
-            echo "#include \"posre_${ligand}.itp\""
-        done
-        echo "#endif"
-    } | sed -i "$((line + 1))r /dev/stdin" topol.top
-fi
-
-### CREATE C-ALPHA RESTRAINTS ###
-log " >  Creating protein restraints..."
-echo -e "3\nq" | gmx make_ndx -f system.gro -o index.ndx
-echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
-sleep 2
-
 ### MINIMISE COMPLEX ###
 log " >  Minimising complex..."
 cat << EOF > em.mdp
@@ -145,6 +116,34 @@ EOF
 
 gmx grompp -f em.mdp -c system.gro -r system.gro -p topol.top -o em.tpr -maxwarn 100
 gmx mdrun -deffnm em -ntomp 24 -ntmpi 1 -v
+sleep 2
+
+if [ -n "$ligands" ]; then
+    ### CREATE LIGAND RESTRAINTS ###
+    log " >  Creating ligand restraints..."
+    line=$(sed -n '/Include ligand topology/=' topol.top)
+    
+    for ligand in $ligands; do
+        echo -e "2 & a C*\ndel 0-2\nq" | gmx make_ndx -f "${ligand}.gro" -o "${ligand}.ndx"
+        gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 1000 1000 1000
+    done
+
+    ### ADD RESTRAINTS TO TOPOLOGY ###
+    {
+        echo ""
+        echo "; Ligand position restraints"
+        echo "#ifdef POSRES_LIG"
+        for ligand in $ligands; do
+            echo "#include \"posre_${ligand}.itp\""
+        done
+        echo "#endif"
+    } | sed -i "$((line + 1))r /dev/stdin" topol.top
+fi
+
+### CREATE C-ALPHA RESTRAINTS ###
+log " >  Creating protein restraints..."
+echo -e "a CA\nq" | gmx make_ndx -f protein.gro -o index.ndx
+echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
 sleep 2
 
 ### NVT/NPT EQUILIBRATION ###
@@ -204,7 +203,7 @@ gen-seed                = -1             ; generate a random seed
 EOF
 
 gmx grompp -f nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr -maxwarn 100
-gmx mdrun -deffnm nvt -bonded gpu -pme gpu 
+gmx mdrun -deffnm nvt -bonded auto -pme auto -update auto 
 
 cat << EOF > npt.mdp
 ; Working with ff99SB-ILDN
@@ -254,43 +253,45 @@ ref-t                   = 300            ; reference temperature (K)
 ; Pressure coupling
 pcoupl                  = C-rescale      ; pressure coupling
 pcoupltype              = isotropic      ; scaling of box vectors
-tau-p                   = 2.0            ; time constant (ps)
+tau-p                   = 5.0            ; time constant (ps)
 ref-p                   = 1.0            ; reference pressure (bar)
 compressibility         = 4.5e-5         ; isothermal compressibility of water (bar^-1)
+nstpcouple              = 10
+refcoord-scaling        = all
 
 ; Velocity generation
 gen-vel                 = no             ; velocity generation off after NVT
 EOF
 
 gmx grompp -f npt.mdp -c nvt.gro -t nvt.cpt -r nvt.gro -p topol.top -o npt_1.tpr -maxwarn 100
-gmx mdrun -deffnm npt_1 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_1 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 100 100 100
+echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 100 100 100
 gmx grompp -f npt.mdp -c npt_1.gro -t npt_1.cpt -r npt_1.gro -p topol.top -o npt_2.tpr -maxwarn 100
-gmx mdrun -deffnm npt_2 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_2 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 10 10 10
+echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 10 10 10
 gmx grompp -f npt.mdp -c npt_2.gro -t npt_2.cpt -r npt_2.gro -p topol.top -o npt_3.tpr -maxwarn 100
-gmx mdrun -deffnm npt_3 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_3 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f system.gro -n index.ndx -o posre.itp -fc 0 0 0
+echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 0 0 0
 for ligand in $ligands; do
   gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
 done
 gmx grompp -f npt.mdp -c npt_3.gro -t npt_3.cpt -r npt_3.gro -p topol.top -o npt_4.tpr -maxwarn 100
-gmx mdrun -deffnm npt_4 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_4 -bonded auto -pme auto -update auto
 
 for ligand in $ligands; do
   gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 10 10 10
 done
 gmx grompp -f npt.mdp -c npt_4.gro -t npt_4.cpt -r npt_4.gro -p topol.top -o npt_5.tpr -maxwarn 100
-gmx mdrun -deffnm npt_5 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_5 -bonded auto -pme auto -update auto
 
 for ligand in $ligands; do
   gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 0 0 0
 done
 gmx grompp -f npt.mdp -c npt_5.gro -t npt_5.cpt -r npt_5.gro -p topol.top -o npt_6.tpr -maxwarn 100
-gmx mdrun -deffnm npt_6 -bonded gpu -pme gpu
+gmx mdrun -deffnm npt_6 -bonded auto -pme auto -update auto
 
 # Wrap unit cell for visual inspection
 echo 0 | gmx trjconv -s em.tpr -f npt_6.gro -o wrap_tmp.gro -pbc whole
