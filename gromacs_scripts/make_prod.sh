@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Parse command-line args
 EARLYSTOP=0
-LENGTH=100
-NREPS=5
+LENGTH=500
+NREPS=1
 BASE_SEED=1000
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,8 +29,17 @@ log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
 
+### NOTIFICATION SYSTEM ###
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NOTIFY_SCRIPT="${SCRIPT_DIR}/notify.sh"
+trap 'status=$?; bash "$NOTIFY_SCRIPT" "$status" || true' EXIT
+
 for rep in $(seq 1 "${NREPS}"); do
-  OUT_NAME="md_${LENGTH}_rep${rep}"
+  if [[ "${NREPS}" -eq 1 ]]; then
+    OUT_NAME="md_${LENGTH}"
+  else
+    OUT_NAME="md_${LENGTH}_rep${rep}"
+  fi
   SEED=$((BASE_SEED + rep))
 
   # Generate MDP
@@ -110,8 +119,8 @@ EOF
 
   ### PRODUCTION ###
   log " > Running replica ${rep}/${NREPS}: ${OUT_NAME} (${LENGTH} ns, seed=${SEED})..."
-  gmx grompp -f "prod_rep${rep}.mdp" -c npt.gro -p topol.top -n index.ndx -o "${OUT_NAME}.tpr" -maxwarn 100
-  gmx mdrun -deffnm "${OUT_NAME}" -bonded gpu -pme gpu & MDPID=$!
+  gmx grompp -f "prod_rep${rep}.mdp" -c npt.gro -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
+  gmx mdrun -deffnm "${OUT_NAME}" -bonded auto -pme auto -update auto & MDPID=$!
   killed_by_distance=0
 
   if [[ "${EARLYSTOP}" -eq 1 ]]; then

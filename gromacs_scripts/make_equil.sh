@@ -1,9 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Usage:
-#   bash make_equil.sh [ligand1 ligand2 ...]
-
 # Parse command-line args
 LIGANDS=()
 while [[ $# -gt 0 ]]; do
@@ -118,8 +115,26 @@ gmx grompp -f em.mdp -c system.gro -r system.gro -p topol.top -o em.tpr -maxwarn
 gmx mdrun -deffnm em -ntomp 24 -ntmpi 1 -v
 sleep 2
 
+### CREATE PROTEIN RESTRAINTS ###
+log " >  Creating protein restraints..."
+echo -e "q" | gmx make_ndx -f protein.gro -o index.ndx
+
+# Check for structural ions
+HAS_IONS=0
+tmp_ndx_check=$(mktemp)
+if echo -e "l\nq" | gmx make_ndx -f protein.gro -o "$tmp_ndx_check" 2>/dev/null | grep -qE '[[:space:]]Ion([[:space:]]|$)'; then
+    echo -e "\"C-alpha\" | \"Ion\"\nq" | gmx make_ndx -f protein.gro -o index.ndx
+    PROTEIN_GROUP="C-alpha_Ion"
+else
+    PROTEIN_GROUP="C-alpha"
+fi
+rm -f "$tmp_ndx_check"
+
+echo "$PROTEIN_GROUP" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
+sleep 2
+
+### CREATE LIGAND RESTRAINTS ###
 if [ -n "$ligands" ]; then
-    ### CREATE LIGAND RESTRAINTS ###
     log " >  Creating ligand restraints..."
     line=$(sed -n '/Include ligand topology/=' topol.top)
     
@@ -139,12 +154,6 @@ if [ -n "$ligands" ]; then
         echo "#endif"
     } | sed -i "$((line + 1))r /dev/stdin" topol.top
 fi
-
-### CREATE C-ALPHA RESTRAINTS ###
-log " >  Creating protein restraints..."
-echo -e "a CA\nq" | gmx make_ndx -f protein.gro -o index.ndx
-echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 1000 1000 1000
-sleep 2
 
 ### NVT/NPT EQUILIBRATION ###
 log " >  Equilibrating in NVT/NPT ensemble..."
@@ -266,15 +275,15 @@ EOF
 gmx grompp -f npt.mdp -c nvt.gro -t nvt.cpt -r nvt.gro -p topol.top -o npt_1.tpr -maxwarn 100
 gmx mdrun -deffnm npt_1 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 100 100 100
+echo "$PROTEIN_GROUP" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 100 100 100
 gmx grompp -f npt.mdp -c npt_1.gro -t npt_1.cpt -r npt_1.gro -p topol.top -o npt_2.tpr -maxwarn 100
 gmx mdrun -deffnm npt_2 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 10 10 10
+echo "$PROTEIN_GROUP" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 10 10 10
 gmx grompp -f npt.mdp -c npt_2.gro -t npt_2.cpt -r npt_2.gro -p topol.top -o npt_3.tpr -maxwarn 100
 gmx mdrun -deffnm npt_3 -bonded auto -pme auto -update auto
 
-echo "3" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 0 0 0
+echo "$PROTEIN_GROUP" | gmx genrestr -f protein.gro -n index.ndx -o posre.itp -fc 0 0 0
 for ligand in $ligands; do
     gmx genrestr -f "${ligand}.gro" -n "${ligand}.ndx" -o "posre_${ligand}.itp" -fc 100 100 100
 done
