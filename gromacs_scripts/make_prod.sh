@@ -35,11 +35,12 @@ NOTIFY_SCRIPT="${SCRIPT_DIR}/notify.sh"
 trap 'status=$?; bash "$NOTIFY_SCRIPT" "$status" || true' EXIT
 
 if [[ "${EARLYSTOP}" -eq 1 ]]; then
-  # Build index from current production system and append a custom Pocket group.
-  echo -e "q" | gmx make_ndx -f npt.gro -o index_prod.ndx >/dev/null
-  gmx select -s npt.gro -n index_prod.ndx -on pocket.ndx -select 'group "Protein" and same residue as (within 0.45 of group "LIG")'
-  sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
-  cat pocket.ndx >> index_prod.ndx
+  # Build pocket.ndx with default groups, then append custom Pocket group.
+  echo -e "q" | gmx make_ndx -f npt.gro -o pocket.ndx >/dev/null
+  gmx select -s npt.gro -n pocket.ndx -on pocket_tmp.ndx -select 'group "Protein" and same residue as (within 0.45 of group "LIG")'
+  sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket_tmp.ndx
+  cat pocket_tmp.ndx >> pocket.ndx
+  rm -f pocket_tmp.ndx
 
   # pbcatom: first atom listed in pocket.ndx
   PULL_GROUP1_PBCATOM="$(awk 'NR>1 {print $1; exit}' pocket.ndx)"
@@ -137,9 +138,9 @@ EOF
   fi
 
   ### PRODUCTION ###
-  log " > Running replica ${rep}/${NREPS}: ${OUT_NAME} (${LENGTH} ns, seed=${SEED})..."
+  log " > Running ${OUT_NAME} (${LENGTH} ns)..."
   if [[ "${EARLYSTOP}" -eq 1 ]]; then
-    gmx grompp -f "${MDP_NAME}" -c npt.gro -p topol.top -n index_prod.ndx -o "${OUT_NAME}.tpr" -maxwarn 100
+    gmx grompp -f "${MDP_NAME}" -c npt.gro -p topol.top -n pocket.ndx -o "${OUT_NAME}.tpr" -maxwarn 100
   else
     gmx grompp -f "${MDP_NAME}" -c npt.gro -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
   fi
