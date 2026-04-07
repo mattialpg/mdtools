@@ -36,7 +36,7 @@ trap 'status=$?; bash "$NOTIFY_SCRIPT" "$status" || true' EXIT
 
 if [[ "${EARLYSTOP}" -eq 1 ]]; then
   # Build pocket.ndx with default groups, then append custom Pocket group.
-  echo -e "q" | gmx make_ndx -f npt.gro -o pocket.ndx >/dev/null
+  echo -e "0\nq" | gmx make_ndx -f npt.gro -o pocket.ndx >/dev/null
   gmx select -s npt.gro -n pocket.ndx -on pocket_tmp.ndx -select 'group "Protein" and same residue as (within 0.45 of group "LIG")'
   sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket_tmp.ndx
   cat pocket_tmp.ndx >> pocket.ndx
