@@ -34,21 +34,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NOTIFY_SCRIPT="${SCRIPT_DIR}/notify.sh"
 trap 'status=$?; bash "$NOTIFY_SCRIPT" "$status" || true' EXIT
 
+if [[ "${EARLYSTOP}" -eq 1 ]]; then
+  # Build index from current production system and append a custom Pocket group.
+  echo -e "q" | gmx make_ndx -f npt.gro -o index_prod.ndx >/dev/null
+  gmx select -s npt.gro -n index_prod.ndx -on pocket.ndx -select 'group "Protein" and same residue as (within 0.45 of group "LIG")'
+  sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
+  cat pocket.ndx >> index_prod.ndx
+
+  # pbcatom: first atom listed in pocket.ndx
+  PULL_GROUP1_PBCATOM="$(awk 'NR>1 {print $1; exit}' pocket.ndx)"
+  if [[ -z "${PULL_GROUP1_PBCATOM:-}" ]]; then
+    echo "Error: Pocket group is empty; cannot set pull-group1-pbcatom." >&2
+    exit 1
+  fi
+fi
+
 for rep in $(seq 1 "${NREPS}"); do
   if [[ "${NREPS}" -eq 1 ]]; then
     OUT_NAME="md_${LENGTH}"
+    MDP_NAME="prod.mdp"
   else
     OUT_NAME="md_${LENGTH}_rep${rep}"
+    MDP_NAME="prod_rep${rep}.mdp"
   fi
   SEED=$((BASE_SEED + rep))
 
   # Generate MDP
-  cat > "prod_rep${rep}.mdp" <<EOF
+  cat > "${MDP_NAME}" <<EOF
 ; Force field = ff99SB-ILDN
 
 ; Run parameters
 integrator              = md
-nsteps                  = ${NSTEPS}    ; ${DT} * ${NSTEPS} = ${LENGTH} ns
+nsteps                  = ${NSTEPS}    ; ${LENGTH} ns
 dt                      = ${DT}
 
 ; Standard output
@@ -101,11 +118,11 @@ compressibility         = 4.5e-5
 EOF
 
   if [[ "${EARLYSTOP}" -eq 1 ]]; then
-    cat >> "prod_rep${rep}.mdp" <<EOF
-; Pull code to monitor Protein-LIG COM distance (no bias)
+    cat >> "${MDP_NAME}" <<EOF
+; Pull code to monitor Pocket-LIG COM distance (no bias)
 pull                    = yes
 pull-ngroups            = 2
-pull-group1-name        = Protein
+pull-group1-name        = Pocket
 pull-group2-name        = LIG
 pull-ncoords            = 1
 pull-coord1-geometry    = distance
@@ -113,13 +130,19 @@ pull-coord1-groups      = 1 2
 pull-coord1-dim         = Y Y Y
 pull-coord1-start       = yes
 pull-coord1-k           = 0
+pull-group1-pbcatom     = ${PULL_GROUP1_PBCATOM}
+pull-pbc-ref-prev-step-com = yes
 pull-nstxout            = 5000    ; 10 ps
 EOF
   fi
 
   ### PRODUCTION ###
   log " > Running replica ${rep}/${NREPS}: ${OUT_NAME} (${LENGTH} ns, seed=${SEED})..."
-  gmx grompp -f "prod_rep${rep}.mdp" -c npt.gro -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
+  if [[ "${EARLYSTOP}" -eq 1 ]]; then
+    gmx grompp -f "${MDP_NAME}" -c npt.gro -p topol.top -n index_prod.ndx -o "${OUT_NAME}.tpr" -maxwarn 100
+  else
+    gmx grompp -f "${MDP_NAME}" -c npt.gro -p topol.top -o "${OUT_NAME}.tpr" -maxwarn 100
+  fi
   gmx mdrun -deffnm "${OUT_NAME}" -bonded auto -pme auto -update auto & MDPID=$!
   killed_by_distance=0
 
@@ -130,9 +153,9 @@ EOF
       [[ -s "${OUT_NAME}_pullx.xvg" ]] || continue
 
       dist=$(awk '$1 !~ /^[@#]/ && $2+0==$2 {!first && (first=$2); last=$2} END{if(first=="" || last=="") print "NA"; else {d=last-first; print d<0?-d:d}}' "${OUT_NAME}_pullx.xvg")
-      print " > [rep${rep}] Protein-LIG distance drift: ${dist} nm"
+      echo " > [rep${rep}] Pocket-LIG distance drift: ${dist} nm"
       if awk -v d="${dist}" -v c="${DIST_CUTOFF}" 'BEGIN{exit !((d+0) > c)}'; then
-        print " > [rep${rep}] Distance drift (${dist} nm) > ${DIST_CUTOFF} nm: stopping dynamics."
+        echo " > [rep${rep}] Distance drift (${dist} nm) > ${DIST_CUTOFF} nm: stopping dynamics."
         kill -TERM "${MDPID}" 2>/dev/null || true
         killed_by_distance=1
         break
@@ -142,6 +165,10 @@ EOF
 
   if [[ "${killed_by_distance}" -eq 1 ]]; then
     wait "${MDPID}" || true
+    if [[ ! -s "${OUT_NAME}.gro" && -s "${OUT_NAME}.xtc" && -s "${OUT_NAME}.tpr" ]]; then
+      log " > Early-stop detected: writing final structure from last trajectory frame..."
+      echo "0" | gmx trjconv -f "${OUT_NAME}.xtc" -s "${OUT_NAME}.tpr" -o "${OUT_NAME}.gro" -dump -1
+    fi
   else
     wait "${MDPID}"
   fi
