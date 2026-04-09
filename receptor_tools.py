@@ -134,19 +134,22 @@ def reconstruct_loops(pdb_id, chain="A", domain=None):
 def prepare_receptor(configs, archive_dir=ARCHIVE_DIR):
     """Prepare receptor PDB/PDBQT using archive-or-reconstruct logic."""
     workdir = Path(configs["workdir"])
-    print(f"Preparing receptor for {configs['receptor_id']}")
-    
-    parts = configs["receptor_id"].split(":")
+    protein_cfg = configs.get("protein", {}) if isinstance(configs.get("protein"), dict) else {}
+    receptor_id = configs.get("receptor_id") or protein_cfg.get("id")
+    receptor_name = configs.get("receptor_name") or protein_cfg.get("name") or "protein"
+    print(f"Preparing receptor for {receptor_id}")
+
+    parts = receptor_id.split(":")
     pdb_id, chain = parts[0], parts[1]
     domain = parts[2] if len(parts) > 2 else None
 
     pdb_infile = workdir / f"{pdb_id}.pdb"
-    pdb_outfile = workdir / f"{configs['receptor_name']}.pdb"
+    pdb_outfile = workdir / f"{receptor_name}.pdb"
     receptor_pdbqt = pdb_outfile.with_suffix(".pdbqt")
 
     has_missing_loops = extract_receptor(pdb_infile, pdb_outfile, chain, domain)
     if has_missing_loops:
-        modeller_dir_name = f"{configs['receptor_id'].replace(':', '_')}.modeller"
+        modeller_dir_name = f"{receptor_id.replace(':', '_')}.modeller"
         archived_model_dir = Path(archive_dir) / modeller_dir_name
         model_dir = workdir / MODEL_DIR_NAME
 
@@ -160,4 +163,3 @@ def prepare_receptor(configs, archive_dir=ARCHIVE_DIR):
     subprocess.run([configs["obabel"], str(pdb_outfile), "-xr", "-O", str(receptor_pdbqt)],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return receptor_pdbqt
-

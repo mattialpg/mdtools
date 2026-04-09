@@ -2,7 +2,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import os, sys, glob
-import yaml
 from pathlib import Path
 import argparse
 import numpy as np
@@ -23,8 +22,7 @@ import interaction_tools as inttools
 
 class TimeSeriesAnalysis:
     def __init__(self, trj_name, config_path='config.yaml'):
-        with open(config_path) as f:
-            self.configs = yaml.safe_load(f)
+        self.configs = utils.read_config_file(config_path)
         self.ligand_name = self.configs['ligand_name']
         self.ligand_md_id = self.configs['ligand_md_id']
         self.pdb_id = self.configs['receptor_id']

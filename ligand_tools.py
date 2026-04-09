@@ -5,9 +5,10 @@ import subprocess
 def prepare_ligand(configs):
     """Prepare ligand from SMILES and return the ligand PDBQT path."""
     workdir = Path(configs["workdir"])
-    ligand_id = configs["ligand_id"]
-    ligand_name = configs["ligand_name"]
-    ligand_smiles = configs["ligand_smiles"]
+    ligand_cfg = configs.get("ligand", {}) if isinstance(configs.get("ligand"), dict) else {}
+    ligand_id = configs.get("ligand_id") or ligand_cfg.get("id")
+    ligand_name = configs.get("ligand_name") or ligand_cfg.get("name") or "ligand"
+    ligand_smiles = configs.get("ligand_smiles") or ligand_cfg.get("smiles")
     obabel = configs["obabel"]
 
     print(f"Preparing ligand {ligand_id}")

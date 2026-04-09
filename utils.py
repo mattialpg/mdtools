@@ -77,13 +77,16 @@ def write_config_file(self_dict):
     config_file = Path('config.yaml')
 
     configs = {
-        'receptor_id': self_dict['receptor_id'],
-        'receptor_name': self_dict['receptor_name'],
-
-        'ligand_id': self_dict['lig_new_id'],
-        'ligand_smiles': self_dict['lig_new_smiles'],
-        'ligand_name': self_dict['ligand_name'],
-        'ligand_md_id': self_dict['lig_new_md_id'],
+        'protein': {
+            'id': self_dict['receptor_id'],
+            'name': self_dict['receptor_name'],
+        },
+        'ligand': {
+            'id': self_dict['lig_new_id'],
+            'smiles': self_dict['lig_new_smiles'],
+            'name': self_dict['ligand_name'],
+            'md_id': self_dict['lig_new_md_id'],
+        },
 
         'box_center': self_dict['box_center'],
         'box_size': self_dict['box_size'],
@@ -98,7 +101,7 @@ def write_config_file(self_dict):
         'vina': self_dict.get('vina', TOOL_PATHS['vina'])}
         
     config_text = yaml.safe_dump(configs, sort_keys=False)
-    for key in ('ligand_id:', 'box_center:', 'energy_range:', 'workdir:'):
+    for key in ('ligand:', 'box_center:', 'energy_range:', 'workdir:'):
         config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
     config_file.write_text(config_text)
 
@@ -107,7 +110,28 @@ def write_config_file(self_dict):
 
 
 def read_config_file(config_file=Path("config.yaml")):
-    configs = yaml.safe_load(Path(config_file).read_text())
+    configs = yaml.safe_load(Path(config_file).read_text()) or {}
+
+    protein = configs.get("protein") or {}
+    ligand = configs.get("ligand") or {}
+    if isinstance(protein, dict):
+        if protein.get("id") and not configs.get("receptor_id"):
+            configs["receptor_id"] = protein["id"]
+        if protein.get("name") and not configs.get("receptor_name"):
+            configs["receptor_name"] = protein["name"]
+    if isinstance(ligand, dict):
+        if ligand.get("id") and not configs.get("ligand_id"):
+            configs["ligand_id"] = ligand["id"]
+        if ligand.get("smiles") and not configs.get("ligand_smiles"):
+            configs["ligand_smiles"] = ligand["smiles"]
+        if ligand.get("name") and not configs.get("ligand_name"):
+            configs["ligand_name"] = ligand["name"]
+        if ligand.get("md_id") and not configs.get("ligand_md_id"):
+            configs["ligand_md_id"] = ligand["md_id"]
+
+    configs.setdefault("receptor_name", "protein")
+    configs.setdefault("ligand_name", "ligand")
+    configs.setdefault("ligand_md_id", "LIG")
 
     receptor_id = configs.get("receptor_id")
     if receptor_id:
@@ -126,6 +150,17 @@ def read_config_file(config_file=Path("config.yaml")):
 
     for key, value in TOOL_PATHS.items():
         configs.setdefault(key, value)
+
+    configs["protein"] = {
+        "id": configs.get("receptor_id"),
+        "name": configs.get("receptor_name"),
+    }
+    configs["ligand"] = {
+        "id": configs.get("ligand_id"),
+        "smiles": configs.get("ligand_smiles"),
+        "name": configs.get("ligand_name"),
+        "md_id": configs.get("ligand_md_id"),
+    }
 
     return configs
 

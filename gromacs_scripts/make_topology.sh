@@ -3,22 +3,24 @@ set -euo pipefail
 shopt -s nullglob
 
 # Usage:
-#   ./make_topology.sh -lig LIGAND_NAME
+#   ./make_topology.sh -lig LIGAND_NAME [-nc NET_CHARGE]
 
 # Parse command-line args
+NET_CHARGE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -lig) LIGAND_NAME="$2"; shift 2 ;;
+    -nc) NET_CHARGE="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -lig LIGAND_NAME"
+      echo "Usage: $0 -lig LIGAND_NAME [-nc NET_CHARGE]"
       exit 0
       ;;
-    *) echo "Usage: $0 -lig LIGAND_NAME"; exit 1 ;;
+    *) echo "Usage: $0 -lig LIGAND_NAME [-nc NET_CHARGE]"; exit 1 ;;
   esac
 done
 
 if [[ -z "${LIGAND_NAME:-}" || "${LIGAND_NAME}" == *.* || ! -s "${LIGAND_NAME}.sdf" ]]; then
-  echo "Usage: $0 -lig LIGAND_NAME"
+  echo "Usage: $0 -lig LIGAND_NAME [-nc NET_CHARGE]"
   exit 1
 fi
 
@@ -39,7 +41,7 @@ quit
 EOF
 
 log " >  Calculating charges..."
-antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc 0 -m 1
+antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc "${NET_CHARGE}" -m 1
 sed -i "s/\<MOL\>/${ligand_md_id}/g" "${output_name}.mol2"
 rm -rf "${LIGAND_NAME}.antechamber"; mkdir "${LIGAND_NAME}.antechamber"
 mv ANTECHAMBER_* ATOMTYPE* sqm.* "${LIGAND_NAME}.antechamber"
@@ -62,6 +64,17 @@ sed -i "s/\b${output_name}\b/${ligand_md_id}/g" "${LIGAND_NAME}.itp"
 
 mv -f tleap_topology.in "${output_name}".* leap.log "${LIGAND_NAME}.acpype/"
 cp "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.gro" "${LIGAND_NAME}.gro"
+
+# Replace GRO residue name with ligand_md_id
+awk -v new_resn="${ligand_md_id}" '
+  NR <= 2 { print; next }
+  NR == total { print; next }
+  {
+    resn = sprintf("%-5.5s", new_resn)
+    print substr($0, 1, 5) resn substr($0, 11)
+  }
+' total="$(wc -l < "${LIGAND_NAME}.gro")" "${LIGAND_NAME}.gro" > "${LIGAND_NAME}.gro.tmp"
+mv "${LIGAND_NAME}.gro.tmp" "${LIGAND_NAME}.gro"
 
 obabel "${LIGAND_NAME}.sdf" -O "${LIGAND_NAME}.pdb" --writeconect
 sed -i "s/\<UNNAMED\>/${ligand_md_id}/g" "${LIGAND_NAME}.pdb"

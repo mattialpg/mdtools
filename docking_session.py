@@ -220,13 +220,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run a redocking workflow")
     parser.add_argument('--pdb', help="Receptor ID (e.g. 1ABC or 1ABC:A:45-210)")
     parser.add_argument('--lig_new', help="New ligand SMILES")
+    parser.add_argument('--lig_id', help="New ligand name")
     parser.add_argument('--lig_file', help="CSV file containing ligand SMILES")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose logging")
     args = parser.parse_args()
     logger = utils.setup_logger(level=logging.INFO if args.verbose else logging.WARNING)
 
+    lig_id = args.lig_id if args.lig_id else 'LIG'
     if args.lig_new:
-        docking_jobs = [(args.pdb, 'LIG', args.lig_new)]
+        docking_jobs = [(args.pdb, lig_id, args.lig_new)]
     elif args.lig_file:
         df = pd.read_csv(args.lig_file, sep=R'\t+', engine='python')
         docking_jobs = [(row['RECEPTOR_ID'], row['LIGAND_ID'], row['LIGAND_SMILES'])

@@ -56,8 +56,8 @@ if [ -n "$ligands" ]; then
     } | sed -i "$((line + 1))r /dev/stdin" topol.top
 
     for ligand in $ligands; do
-          ligand_md_id=$(sed -n '2p' "${ligand}.sdf" | tr -d '\r' | xargs)  # Extract the second line from ${ligand}.sdf
-        sed -i -e "\$a${ligand_md_id}                 1" topol.top  # Append the ligand name at the end of topol.top
+          ligand_md_id=$(sed -n '2p' "${ligand}.sdf" | tr -d '\r' | xargs)
+        sed -i -e "\$a${ligand_md_id}                 1" topol.top
     done    
 else
     cp protein.gro complex.gro
@@ -136,7 +136,7 @@ sleep 2
 ### CREATE LIGAND RESTRAINTS ###
 if [ -n "$ligands" ]; then
     log " >  Creating ligand restraints..."
-    line=$(sed -n '/Include ligand topology/=' topol.top)
+    line=$(grep -n '^\[ system \]' topol.top | cut -d: -f1)
     
     for ligand in $ligands; do
         echo -e "2 & a C*\ndel 0-2\nq" | gmx make_ndx -f "${ligand}.gro" -o "${ligand}.ndx"
@@ -152,7 +152,7 @@ if [ -n "$ligands" ]; then
             echo "#include \"posre_${ligand}.itp\""
         done
         echo "#endif"
-    } | sed -i "$((line + 1))r /dev/stdin" topol.top
+    } | sed -i "$((line - 1))r /dev/stdin" topol.top
 fi
 
 ### NVT/NPT EQUILIBRATION ###

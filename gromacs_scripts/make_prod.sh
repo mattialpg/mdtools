@@ -32,17 +32,18 @@ log() {
 ### NOTIFICATION SYSTEM ###
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NOTIFY_SCRIPT="${SCRIPT_DIR}/notify.sh"
-trap 'status=$?; bash "$NOTIFY_SCRIPT" "$status" || true' EXIT
+NOTIFY_TEXT=""
+trap 'status=$?; if [[ -n "${NOTIFY_TEXT:-}" ]]; then bash "$NOTIFY_SCRIPT" "$status" "$(basename "$PWD"): ${NOTIFY_TEXT}" || true; else bash "$NOTIFY_SCRIPT" "$status" || true; fi' EXIT
 
 if [[ "${EARLYSTOP}" -eq 1 ]]; then
-  # Build pocket.ndx with default groups, then append custom Pocket group.
+  # Build pocket.ndx
   echo -e "0\nq" | gmx make_ndx -f npt.gro -o pocket.ndx >/dev/null
   gmx select -s npt.gro -n pocket.ndx -on pocket_tmp.ndx -select 'group "Protein" and same residue as (within 0.45 of group "LIG")'
   sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket_tmp.ndx
   cat pocket_tmp.ndx >> pocket.ndx
   rm -f pocket_tmp.ndx
 
-  # pbcatom: first atom listed in pocket.ndx
+  # Select first atom in Pocket group
   PULL_GROUP1_PBCATOM="$(awk 'NR>1 {print $1; exit}' pocket.ndx)"
   if [[ -z "${PULL_GROUP1_PBCATOM:-}" ]]; then
     echo "Error: Pocket group is empty; cannot set pull-group1-pbcatom." >&2
@@ -150,13 +151,15 @@ EOF
   if [[ "${EARLYSTOP}" -eq 1 ]]; then
     while kill -0 "${MDPID}" 2>/dev/null; do
       sleep "${MONITOR_INTERVAL}"
+      kill -0 "${MDPID}" 2>/dev/null || break
 
       [[ -s "${OUT_NAME}_pullx.xvg" ]] || continue
 
       dist=$(awk '$1 !~ /^[@#]/ && $2+0==$2 {!first && (first=$2); last=$2} END{if(first=="" || last=="") print "NA"; else {d=last-first; print d<0?-d:d}}' "${OUT_NAME}_pullx.xvg")
-      echo " > [rep${rep}] Pocket-LIG distance drift: ${dist} nm"
+      echo " > Pocket-LIG distance drift: ${dist} nm"
       if awk -v d="${dist}" -v c="${DIST_CUTOFF}" 'BEGIN{exit !((d+0) > c)}'; then
-        echo " > [rep${rep}] Distance drift (${dist} nm) > ${DIST_CUTOFF} nm: stopping dynamics."
+        NOTIFY_TEXT="MD stopped by distance (drift = ${dist} nm > ${DIST_CUTOFF} nm)"
+        echo " > ${NOTIFY_TEXT}"
         kill -TERM "${MDPID}" 2>/dev/null || true
         killed_by_distance=1
         break
@@ -167,7 +170,6 @@ EOF
   if [[ "${killed_by_distance}" -eq 1 ]]; then
     wait "${MDPID}" || true
     if [[ ! -s "${OUT_NAME}.gro" && -s "${OUT_NAME}.xtc" && -s "${OUT_NAME}.tpr" ]]; then
-      log " > Early-stop detected: writing final structure from last trajectory frame..."
       echo "0" | gmx trjconv -f "${OUT_NAME}.xtc" -s "${OUT_NAME}.tpr" -o "${OUT_NAME}.gro" -dump -1
     fi
   else
