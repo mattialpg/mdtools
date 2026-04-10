@@ -5,7 +5,16 @@ import subprocess
 def prepare_ligand(configs):
     """Prepare ligand from SMILES and return the ligand PDBQT path."""
     workdir = Path(configs["workdir"])
-    ligand_cfg = configs.get("ligand", {}) if isinstance(configs.get("ligand"), dict) else {}
+    ligand_cfg = {}
+    ligands = configs.get("ligands")
+    if isinstance(ligands, list) and ligands and isinstance(ligands[0], dict):
+        ligand_cfg = ligands[0]
+    elif isinstance(ligands, dict):
+        ligand_cfg = ligands
+    elif isinstance(configs.get("ligand"), dict):
+        # Backward compatibility for old singular schema.
+        ligand_cfg = configs["ligand"]
+
     ligand_id = configs.get("ligand_id") or ligand_cfg.get("id")
     ligand_name = configs.get("ligand_name") or ligand_cfg.get("name") or "ligand"
     ligand_smiles = configs.get("ligand_smiles") or ligand_cfg.get("smiles")

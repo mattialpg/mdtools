@@ -72,36 +72,31 @@ def get_tool_paths(config_file=Path("config.yaml")):
     return tools
 
 
-def write_config_file(self_dict):
+def write_config_file(preprocess_dict):
     cwd = Path.cwd()
     config_file = Path('config.yaml')
 
     configs = {
         'protein': {
-            'id': self_dict['receptor_id'],
-            'name': self_dict['receptor_name'],
-        },
-        'ligand': {
-            'id': self_dict['lig_new_id'],
-            'smiles': self_dict['lig_new_smiles'],
-            'name': self_dict['ligand_name'],
-            'md_id': self_dict['lig_new_md_id'],
-        },
+            'id': preprocess_dict['receptor_id'],
+            'name': preprocess_dict['receptor_name']},
+        
+        "ligands": preprocess_dict["ligands"],
 
-        'box_center': self_dict['box_center'],
-        'box_size': self_dict['box_size'],
+        'box_center': preprocess_dict['box_center'],
+        'box_size': preprocess_dict['box_size'],
 
         'energy_range': 4,
         'exhaustiveness': 16,
         'num_modes': 8,
 
         'workdir': str(cwd),
-        'pymol': self_dict.get('pymol', TOOL_PATHS['pymol']),
-        'obabel': self_dict.get('obabel', TOOL_PATHS['obabel']),
-        'vina': self_dict.get('vina', TOOL_PATHS['vina'])}
+        'pymol': preprocess_dict.get('pymol', TOOL_PATHS['pymol']),
+        'obabel': preprocess_dict.get('obabel', TOOL_PATHS['obabel']),
+        'vina': preprocess_dict.get('vina', TOOL_PATHS['vina'])}
         
     config_text = yaml.safe_dump(configs, sort_keys=False)
-    for key in ('ligand:', 'box_center:', 'energy_range:', 'workdir:'):
+    for key in ('ligands:', 'box_center:', 'energy_range:', 'workdir:'):
         config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
     config_file.write_text(config_text)
 
@@ -113,7 +108,12 @@ def read_config_file(config_file=Path("config.yaml")):
     configs = yaml.safe_load(Path(config_file).read_text()) or {}
 
     protein = configs.get("protein") or {}
-    ligand = configs.get("ligand") or {}
+    ligands = configs.get("ligands")
+    ligand = {}
+    if isinstance(ligands, list) and ligands and isinstance(ligands[0], dict):
+        ligand = ligands[0]
+    elif isinstance(ligands, dict):
+        ligand = ligands
     if isinstance(protein, dict):
         if protein.get("id") and not configs.get("receptor_id"):
             configs["receptor_id"] = protein["id"]
@@ -155,12 +155,15 @@ def read_config_file(config_file=Path("config.yaml")):
         "id": configs.get("receptor_id"),
         "name": configs.get("receptor_name"),
     }
-    configs["ligand"] = {
+    ligand_entry = {
         "id": configs.get("ligand_id"),
         "smiles": configs.get("ligand_smiles"),
         "name": configs.get("ligand_name"),
         "md_id": configs.get("ligand_md_id"),
     }
+    configs["ligands"] = [ligand_entry]
+    # Backward compatibility for code paths that still read singular key.
+    configs["ligand"] = ligand_entry
 
     return configs
 

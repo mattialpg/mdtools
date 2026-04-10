@@ -25,25 +25,28 @@ class Preprocess:
     def __init__(self, receptor_id, lig_new_id, lig_new_smiles):
         self.logger = logging.getLogger(__name__)
 
+        self.receptor_name = 'protein'
         self.receptor_id = receptor_id
         parts = receptor_id.split(':')
         self.pdb_id = parts[0]
         self.chain = parts[1] if len(parts) > 1 else None
         self.domain = parts[2] if len(parts) > 2 else None
 
-        self.lig_new_smiles = lig_new_smiles
         self.lig_new_id = lig_new_id
-        self.lig_new_md_id = 'LIG'
+        self.lig_new_smiles = lig_new_smiles
         self.ligand_name = 'ligand'
-        self.receptor_name = 'protein'
+        self.lig_new_md_id = 'LIG'
 
+        self.ligands = [{"id": self.lig_new_id, "smiles": self.lig_new_smiles,
+            "name": self.ligand_name, "md_id": self.lig_new_md_id, "role": "docked"}]
+        
         tool_paths = utils.get_tool_paths()
         self.pymol = tool_paths['pymol']
         self.obabel = tool_paths['obabel']
         self.vina = tool_paths['vina']
 
 
-    def choose_ligand(self):
+    def choose_ligands(self):
         ligands = inttools.get_ligands(f"{self.pdb_id}.pdb")
         if not ligands:
             self.logger.warning(f"No ligands detected in {self.pdb_id}.pdb")
@@ -51,18 +54,36 @@ class Preprocess:
         if self.chain is not None:
             ligands = {k:v for k, v in ligands.items() if k.split(':')[1] == self.chain}
 
+        sorted_ligands = sorted(
+            ligands.keys(), key=lambda key: (key.split(':')[1],
+                int(re.match(R"^\s*(-?\d+)", key.split(':')[2]).group(1)),
+                key.split(':')[0]))
+
         print("Detected ligands:")
-        for i, (lig_id, loi_status) in enumerate(ligands.items(), start=1):
+        for i, key in enumerate(sorted_ligands, start=1):
+            loi_status, _ = ligands[key]
             mark = f"  ({loi_status})" if loi_status == 'LOI' else ''
-            print(f"   ({i}) Ligand {lig_id}{mark}")
+            print(f"   ({i}) Ligand {key}{mark}")
 
         choice = int(input("\nSelect a ligand to replace: ").strip())
 
-        keys = list(ligands.keys())
+        keys = list(sorted_ligands)
         self.lig_orig_id, self.chain, _ = keys[choice - 1].split(':')
+
         self.receptor_id = f"{self.pdb_id}:{self.chain}"
         if self.domain is not None:
             self.receptor_id += f":{self.domain}"
+
+        # Ask whether additional ligands should be kept
+        if len(keys) > 1:
+            prompt = ("Select ligand(s) to keep or press Enter to continue: ")
+            selected = input(prompt).strip()
+            if selected:
+                for idx in map(int, selected.replace(',', ' ').split()):
+                    key = keys[idx - 1]
+                    _, smiles = ligands[key]
+                    self.ligands.append({"id": key, "smiles": smiles,
+                        "name": "ligand", "md_id": key.split(':')[0], "role": "kept"})
 
 
     def get_box(self):
@@ -245,7 +266,7 @@ if __name__ == '__main__':
         os.chdir(workdir)
         try:
             prep = Preprocess(receptor_id, ligand_id, ligand_smiles)
-            prep.choose_ligand()
+            prep.choose_ligands()
             prep.get_box()
             config_file = Path("config.yaml")
             utils.write_config_file(dict(prep.__dict__))

@@ -50,22 +50,22 @@ FIT_XTC="${RUN_TMPDIR}/${TRJNAME}_fit.xtc"
 NOROT_XTC="${RUN_TMPDIR}/${TRJNAME}_norot.xtc"
 STRIP_XTC="${TRJNAME}_strip.xtc"
 
-# Extract fitted trajectory
-printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${WHOLE_XTC}" \
-  -n index.ndx -pbc whole -dt "${LENGTH_NS}" -novel -ndec 2
-printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${MDNAME}.tpr" -o "${NOJUMP_XTC}" \
-  -n index.ndx -pbc nojump -center -ndec 2
-printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${MDNAME}.tpr" \
-  -o "${FIT_XTC}" -n index.ndx -fit progressive -center -ndec 2
-printf "Backbone\nSystem\n" | gmx trjconv -s "${MDNAME}.tpr" -f "${FIT_XTC}" -o "${NOROT_XTC}" \
-  -n index.ndx -fit rot+trans -ndec 2
+# # Extract fitted trajectory
+# printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${WHOLE_XTC}" \
+#   -n index.ndx -pbc whole -dt "${LENGTH_NS}" -novel -ndec 2
+# printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${MDNAME}.tpr" -o "${NOJUMP_XTC}" \
+#   -n index.ndx -pbc nojump -center -ndec 2
+# printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${MDNAME}.tpr" \
+#   -o "${FIT_XTC}" -n index.ndx -fit progressive -center -ndec 2
+# printf "Backbone\nSystem\n" | gmx trjconv -s "${MDNAME}.tpr" -f "${FIT_XTC}" -o "${NOROT_XTC}" \
+#   -n index.ndx -fit rot+trans -ndec 2
 
-# Strip water and ions
-echo -e '!"Water_and_ions"\nq'| gmx make_ndx -f ${MDNAME}.gro -o index.ndx
-echo "!Water_and_ions" | gmx trjconv -f ${MDNAME}.gro -s "${MDNAME}.tpr" -o ${TRJNAME}_strip.gro -n index.ndx
-echo '!Water_and_ions' | gmx trjconv -f "${NOROT_XTC}" -s "${MDNAME}.tpr" \
-  -n index.ndx -o "${STRIP_XTC}" -ndec 2
-rm -rf "${RUN_TMPDIR}"
+# # Strip water and ions
+# echo -e '!"Water_and_ions"\nq'| gmx make_ndx -f ${MDNAME}.gro -o index.ndx
+# echo "!Water_and_ions" | gmx trjconv -f ${MDNAME}.gro -s "${MDNAME}.tpr" -o ${TRJNAME}_strip.gro -n index.ndx
+# echo '!Water_and_ions' | gmx trjconv -f "${NOROT_XTC}" -s "${MDNAME}.tpr" \
+#   -n index.ndx -o "${STRIP_XTC}" -ndec 2
+# rm -rf "${RUN_TMPDIR}"
 
 # # Calculate protein statistics
 # printf "3 3" | gmx rms -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o trj_rmsd_prot.xvg -tu ns
