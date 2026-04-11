@@ -85,7 +85,6 @@ def write_config_file(preprocess_dict):
 
         'box_center': preprocess_dict['box_center'],
         'box_size': preprocess_dict['box_size'],
-
         'energy_range': 4,
         'exhaustiveness': 16,
         'num_modes': 8,

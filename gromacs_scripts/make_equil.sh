@@ -2,17 +2,20 @@
 set -euo pipefail
 
 # Parse command-line args
-LIGANDS=()
+CONFIG_YAML="config.yaml"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --config) CONFIG_YAML="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: bash make_equil.sh [ligand1 ligand2 ...]"
+      echo "Usage: bash make_equil.sh [--config CONFIG_YAML]"
       exit 0
       ;;
-    *) LIGANDS+=("$1"); shift ;;
+    *)
+      echo "Usage: bash make_equil.sh [--config CONFIG_YAML]"; exit 1 ;;
   esac
 done
 
+mapfile -t LIGANDS < <(yq -r '.ligands[].name // empty' "${CONFIG_YAML}")
 ligands="${LIGANDS[*]}"
 
 log() {
@@ -86,7 +89,7 @@ EOF
 gmx editconf -f complex.gro -o complex_box.gro -bt dodecahedron -d 1
 gmx solvate -cp complex_box.gro -cs spc216.gro -p topol.top -o complex_solv.gro
 gmx grompp -f ions.mdp -c complex_solv.gro -p topol.top -o ions.tpr -maxwarn 100
-echo 'SOL' | gmx genion -s ions.tpr -o system.gro -p topol.top -pname NA -nname CL -neutral
+echo 'SOL' | gmx genion -s ions.tpr -o system.gro -p topol.top -pname K -nname CL -neutral -conc 0.15
 sleep 2
 rm complex_box.gro complex_solv.gro
 

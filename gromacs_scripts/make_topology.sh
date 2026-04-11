@@ -25,9 +25,8 @@ log() {
 
 prepare_ligand_top() {
   local LIGAND_NAME="$1"
+  local ligand_md_id="$2"
   local output_name="${LIGAND_NAME}_amber"
-  local ligand_md_id
-  ligand_md_id=$(sed -n '2p' "${LIGAND_NAME}.sdf" | tr -d '\r' | xargs)
 
   cat > tleap_topology.in <<EOF
 source leaprc.gaff2
@@ -38,7 +37,7 @@ saveamberparm LIGAND ${output_name}.prmtop ${output_name}.rst7
 quit
 EOF
 
-  log " >  Calculating charges for ${LIGAND_NAME}..."
+  log " >  Calculating charges for ${LIGAND_NAME} ($ligand_md_id)..."
   antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc "${NET_CHARGE}" -m 1
   sed -i "s/\<MOL\>/${ligand_md_id}/g" "${output_name}.mol2"
   rm -rf "${LIGAND_NAME}.antechamber"; mkdir "${LIGAND_NAME}.antechamber"
@@ -80,7 +79,11 @@ EOF
 }
 
 # Iterate over ligands
-while IFS= read -r LIGAND_NAME; do
+while IFS=$'\t' read -r LIGAND_NAME LIGAND_MD_ID; do
   [[ -z "$LIGAND_NAME" ]] && continue
-  prepare_ligand_top "$LIGAND_NAME"
-done < <(yq -r '.ligands[].name' "${CONFIG_YAML}")
+  if [[ -z "${LIGAND_MD_ID:-}" || "${LIGAND_MD_ID}" == "null" ]]; then
+    echo "Error: missing md_id for ligand '${LIGAND_NAME}' in ${CONFIG_YAML}"
+    exit 1
+  fi
+  prepare_ligand_top "$LIGAND_NAME" "$LIGAND_MD_ID"
+done < <(yq -r '.ligands[] | [.name, .md_id] | @tsv' "${CONFIG_YAML}")

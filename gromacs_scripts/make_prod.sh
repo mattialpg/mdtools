@@ -169,9 +169,7 @@ EOF
 
   if [[ "${killed_by_distance}" -eq 1 ]]; then
     wait "${MDPID}" || true
-    if [[ ! -s "${OUT_NAME}.gro" && -s "${OUT_NAME}.xtc" && -s "${OUT_NAME}.tpr" ]]; then
-      echo "0" | gmx trjconv -f "${OUT_NAME}.xtc" -s "${OUT_NAME}.tpr" -o "${OUT_NAME}.gro" -dump -1
-    fi
+    echo "0" | gmx trjconv -f "${OUT_NAME}.xtc" -s "${OUT_NAME}.tpr" -o "${OUT_NAME}.gro" -dump -1
   else
     wait "${MDPID}"
   fi
