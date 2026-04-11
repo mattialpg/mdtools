@@ -24,6 +24,7 @@ DT=0.002     # ps (2 fs)
 NSTEPS="$(awk -v L="$LENGTH" -v DT="$DT" 'BEGIN { printf "%.0f", (L*1000.0/DT) }')"
 MONITOR_INTERVAL=300   # seconds
 DIST_CUTOFF=1.5        # nm
+EARLYSTOP_GRACE_SEC=600  # continue MD for 10 minutes after trigger
 
 log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
@@ -147,6 +148,9 @@ EOF
   fi
   gmx mdrun -deffnm "${OUT_NAME}" -bonded auto -pme auto -update auto & MDPID=$!
   killed_by_distance=0
+  grace_started=0
+  trigger_time=0
+  trigger_dist="NA"
 
   if [[ "${EARLYSTOP}" -eq 1 ]]; then
     while kill -0 "${MDPID}" 2>/dev/null; do
@@ -155,14 +159,26 @@ EOF
 
       [[ -s "${OUT_NAME}_pullx.xvg" ]] || continue
 
-      dist=$(awk '$1 !~ /^[@#]/ && $2+0==$2 {!first && (first=$2); last=$2} END{if(first=="" || last=="") print "NA"; else {d=last-first; print d<0?-d:d}}' "${OUT_NAME}_pullx.xvg")
+      dist=$(awk '$1 !~ /^[@#]/ && $1+0==$1 && $2+0==$2 && $1 > 100 { !first && (first=$2); last=$2 }
+             END { if(first=="" || last=="") print "NA";
+                   else { d=last-first; print d<0?-d:d } }' "${OUT_NAME}_pullx.xvg")
       echo " > Pocket-LIG distance drift: ${dist} nm"
       if awk -v d="${dist}" -v c="${DIST_CUTOFF}" 'BEGIN{exit !((d+0) > c)}'; then
-        NOTIFY_TEXT="MD stopped by distance (drift = ${dist} nm > ${DIST_CUTOFF} nm)"
-        echo " > ${NOTIFY_TEXT}"
-        kill -TERM "${MDPID}" 2>/dev/null || true
-        killed_by_distance=1
-        break
+        if [[ "${grace_started}" -eq 0 ]]; then
+          grace_started=1
+          trigger_time=$(date +%s)
+          trigger_dist="${dist}"
+        else
+          now=$(date +%s)
+          elapsed=$(( now - trigger_time ))
+          if (( elapsed >= EARLYSTOP_GRACE_SEC )); then
+            NOTIFY_TEXT="MD stopped by distance (initial drift = ${trigger_dist} nm > ${DIST_CUTOFF} nm)"
+            echo " > ${NOTIFY_TEXT}"
+            kill -TERM "${MDPID}" 2>/dev/null || true
+            killed_by_distance=1
+            break
+          fi
+        fi
       fi
     done
   fi
