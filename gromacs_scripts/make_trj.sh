@@ -1,45 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage:
+#   ./make_trj.sh [--config CONFIG_YAML]
+
 # Parse command-line args
+NET_CHARGE=0
+CONFIG_YAML="config.yaml"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -i) MDNAME="$2"; shift 2 ;;
-    -o) TRJNAME="$2"; shift 2 ;;
+    --config) CONFIG_YAML="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: $0 -i MDNAME [-o TRJNAME]"
-      exit 1
+      echo "Usage: $0 [--config CONFIG_YAML]"
+      exit 0
       ;;
-    *) echo "Usage: $0 -i MDNAME [-o TRJNAME]"; exit 1 ;;
+    *) echo "Usage: $0 [--config CONFIG_YAML]"; exit 1 ;;
   esac
 done
-
-if [[ -z "${MDNAME:-}" ]]; then
-  echo "Error: missing -i"
-  echo "Usage: $0 -i MDNAME [-o TRJNAME]"
-  exit 1
-fi
-
-if [[ -z "${TRJNAME:-}" ]]; then
-  TRJNAME="${MDNAME//md/trj}"
-fi
-
-LENGTH_TAG="${MDNAME#md_}"
-if [[ "${LENGTH_TAG}" =~ ^([0-9]+([.][0-9]+)?) ]]; then
-  LENGTH_NS="${BASH_REMATCH[1]}"
-else
-  echo "Error: could not parse numeric length from MDNAME='${MDNAME}'"
-  echo "Expected names like md_100 or md_100_rep1"
-  exit 1
-fi
-
-if [[ ! -s "${MDNAME}.gro" ]]; then
-  echo "0" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${MDNAME}.gro" -dump -1
-fi
 
 log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
+
+MD_LENGTH=$(yq -r '.md_length // empty' "${CONFIG_YAML}")
+MDNAME="md_${MD_LENGTH}"
+TRJNAME="trj_${MD_LENGTH}"
 
 # Use temporary storage for intermediate trajectory files
 WORK_TMPDIR="${TMPDIR:-/tmp}"
@@ -50,9 +35,13 @@ FIT_XTC="${RUN_TMPDIR}/${TRJNAME}_fit.xtc"
 NOROT_XTC="${RUN_TMPDIR}/${TRJNAME}_norot.xtc"
 STRIP_XTC="${TRJNAME}_strip.xtc"
 
+if [[ ! -s "${MDNAME}.gro" ]]; then
+  echo "0" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${MDNAME}.gro" -dump -1
+fi
+
 # Extract fitted trajectory
 printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${WHOLE_XTC}" \
-  -n index.ndx -pbc whole -dt "${LENGTH_NS}" -novel -ndec 2
+  -n index.ndx -pbc whole -dt "${MD_LENGTH}" -novel -ndec 2
 printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${MDNAME}.tpr" -o "${NOJUMP_XTC}" \
   -n index.ndx -pbc nojump -center -ndec 2
 printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${MDNAME}.tpr" \
