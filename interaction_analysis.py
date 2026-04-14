@@ -15,7 +15,6 @@ from plotly.subplots import make_subplots
 
 import utils, palettes
 
-# Import AIDDTools utils
 sys.path.append('/home/mattia/aiddtools')
 import interaction_tools as inttools
 
