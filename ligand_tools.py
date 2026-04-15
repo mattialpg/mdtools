@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+from pymol2 import PyMOL
 
 
 def prepare_ligand(configs):
@@ -31,3 +32,24 @@ def prepare_ligand(configs):
 
     print(f"Ligand prepared: {pdbqt_free}")
     return pdbqt_free
+
+def extract_ligand(ligand_id, pdb_id, sdf_outfile):
+    """Extract ligand from receptor PDB and save as SDF."""
+    pdb_path = Path(f"{pdb_id}.pdb").resolve()
+    out = Path(sdf_outfile).resolve()
+    if not pdb_path.exists():
+        print(f"PDB file not found: {pdb_path}")
+
+    lig_resname, lig_chain, lig_resid = ligand_id.split(":")
+
+    with PyMOL() as pm:
+        pm.cmd.load(str(pdb_path), "prot")
+        sel_string = f"r. {lig_resname} and chain {lig_chain} and resi {lig_resid}"
+        pm.cmd.select("sel", sel_string)
+        pm.cmd.create("ligand_obj", "sel")
+        pm.cmd.h_add("ligand_obj")
+        pm.cmd.save(str(out), "ligand_obj", format="sdf")
+
+    subprocess.run(["sed", "-i", "1s/.*//", str(out)], check=True)
+    subprocess.run(["sed", "-i", f"2s/.*/{lig_resname}/", str(out)], check=True)
+    subprocess.run(["sed", "-i", "3s/.*//", str(out)], check=True)

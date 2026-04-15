@@ -74,16 +74,19 @@ class Preprocess:
         if self.domain is not None:
             self.receptor_id += f":{self.domain}"
 
-        # Ask whether additional ligands should be kept
+        # Optionally select additional ligands to keep
         if len(keys) > 1:
             prompt = ("Select ligand(s) to keep or press Enter to continue: ")
             selected = input(prompt).strip()
             if selected:
-                for idx in map(int, selected.replace(',', ' ').split()):
+                self.ligand_name = "ligand1"
+                self.ligands[0]["name"] = self.ligand_name
+                for i, idx in enumerate(map(int, selected.replace(',', ' ').split()), start=2):
                     key = keys[idx - 1]
                     _, smiles = ligands[key]
                     self.ligands.append({"id": key, "smiles": smiles,
-                        "name": "ligand", "md_id": key.split(':')[0], "role": "kept"})
+                        "name": f"ligand{i}", "md_id": key.split(':')[0], "role": "kept"})
+                    ligand_tools.extract_ligand(key, self.pdb_id, f"ligand{i}.sdf")
 
 
     def get_box(self):
