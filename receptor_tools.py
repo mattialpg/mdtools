@@ -43,7 +43,6 @@ def _archive_new_model(model_dir, archived_model_dir):
 
 def extract_receptor(pdb_infile, pdb_outfile, chain="A", domain=None):
     """Extract polymer selection and report whether sequence gaps are present."""
-    #TODO: adjust residue numbering offset in protein
     #TODO: check enginerised residues
 
     pdb_path = Path(pdb_infile).resolve()
@@ -53,9 +52,13 @@ def extract_receptor(pdb_infile, pdb_outfile, chain="A", domain=None):
 
     with PyMOL() as pm:
         pm.cmd.load(str(pdb_path), "prot")
-        sel_string = f"polymer and chain {chain}"
+        metal_resn = "+".join(["MG", "ZN", "MN", "FE", "CU", "CO", "NI", "CA"])
+        sel_string = f"(polymer and chain {chain}) or (inorganic and chain {chain} and resn {metal_resn})"
         if domain:
-            sel_string += f" and resi {domain}"
+            sel_string = (
+                f"((polymer and chain {chain} and resi {domain}) or "
+                f"(inorganic and chain {chain} and resn {metal_resn}))"
+            )
         pm.cmd.select("sel", sel_string)
         pm.cmd.save(str(out), "sel")
 
@@ -128,7 +131,15 @@ def reconstruct_loops(pdb_id, chain="A", domain=None):
     if not valid_models:
         raise RuntimeError("MODELLER did not produce any successful models.")
     best = min(valid_models, key=lambda item: item["DOPE score"])
-    shutil.copy(str(model_dir / best["name"]), "protein.pdb")
+    best_model = model_dir / best["name"]
+
+    # Re-align best model to original structure
+    with PyMOL() as pm:
+        pm.cmd.load("protein.pdb", "ref")
+        pm.cmd.load(str(best_model), "best")
+        pm.cmd.align("best", "ref")
+        pm.cmd.create("merged", "best or (ref and inorganic)")
+        pm.cmd.save("protein.pdb", "merged")
 
 
 def prepare_receptor(configs, archive_dir=ARCHIVE_DIR):

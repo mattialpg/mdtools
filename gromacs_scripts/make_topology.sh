@@ -6,7 +6,6 @@ shopt -s nullglob
 #   ./make_topology.sh [--config CONFIG_YAML]
 
 # Parse command-line args
-NET_CHARGE=0
 CONFIG_YAML="config.yaml"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,10 +22,32 @@ log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
 
+detect_formal_charge() {
+  local sdf_file="$1"
+  python - "$sdf_file" <<'PY'
+import sys
+from rdkit import Chem
+
+sdf = sys.argv[1]
+mol = Chem.MolFromMolFile(sdf, sanitize=False, removeHs=False)
+if mol is None:
+    raise SystemExit(1)
+print(Chem.GetFormalCharge(mol))
+PY
+}
+
 prepare_ligand_top() {
   local LIGAND_NAME="$1"
   local ligand_md_id="$2"
   local output_name="${LIGAND_NAME}_amber"
+  local ligand_charge
+
+  if detected_charge="$(detect_formal_charge "${LIGAND_NAME}.sdf" 2>/dev/null)" && [[ -n "${detected_charge}" ]]; then
+    ligand_charge="${detected_charge}"
+  else
+    echo "Error: could not auto-detect formal charge for ${LIGAND_NAME} from ${LIGAND_NAME}.sdf" >&2
+    exit 1
+  fi
 
   cat > tleap_topology.in <<EOF
 source leaprc.gaff2
@@ -38,7 +59,8 @@ quit
 EOF
 
   log " >  Calculating charges for ${LIGAND_NAME} ($ligand_md_id)..."
-  antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" -fo mol2 -c bcc -s 2 -at gaff2 -nc "${NET_CHARGE}" -m 1
+  antechamber -i "${LIGAND_NAME}.sdf" -fi sdf -o "${output_name}.mol2" \
+    -fo mol2 -c bcc -s 2 -at gaff2 -nc "${ligand_charge}" -m 1
   sed -i "s/\<MOL\>/${ligand_md_id}/g" "${output_name}.mol2"
   rm -rf "${LIGAND_NAME}.antechamber"; mkdir "${LIGAND_NAME}.antechamber"
   mv ANTECHAMBER_* ATOMTYPE* sqm.* "${LIGAND_NAME}.antechamber"
@@ -55,8 +77,10 @@ EOF
   rm -rf "${LIGAND_NAME}.acpype"; mv -f "${output_name}.acpype" "${LIGAND_NAME}.acpype"
   rename -f 's/_amber//' "${LIGAND_NAME}.acpype"/*
 
-  awk '/\[ atomtypes \]/,/\[ moleculetype \]/ {if ($0 !~ /\[ moleculetype \]/) print}' "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.prm"
-  awk '/\[ moleculetype \]/,/\[ system \]/ {if ($0 !~ /\[ system \]/) print}' "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.itp"
+  awk '/\[ atomtypes \]/,/\[ moleculetype \]/ {if ($0 !~ /\[ moleculetype \]/) print}' \
+    "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.prm"
+  awk '/\[ moleculetype \]/,/\[ system \]/ {if ($0 !~ /\[ system \]/) print}' \
+    "${LIGAND_NAME}.acpype/${LIGAND_NAME}_GMX.itp" > "${LIGAND_NAME}.itp"
   sed -i "s/\b${output_name}\b/${ligand_md_id}/g" "${LIGAND_NAME}.itp"
 
   mv -f tleap_topology.in "${output_name}".* leap.log "${LIGAND_NAME}.acpype/"
