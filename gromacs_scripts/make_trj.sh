@@ -31,7 +31,6 @@ WORK_TMPDIR="${TMPDIR:-/tmp}"
 RUN_TMPDIR="$(mktemp -d "${WORK_TMPDIR%/}/make_trj.XXXXXX")"
 WHOLE_XTC="${RUN_TMPDIR}/${TRJNAME}_whole.xtc"
 NOJUMP_XTC="${RUN_TMPDIR}/${TRJNAME}_nojump.xtc"
-FIT_XTC="${RUN_TMPDIR}/${TRJNAME}_fit.xtc"
 NOROT_XTC="${RUN_TMPDIR}/${TRJNAME}_norot.xtc"
 STRIP_XTC="${TRJNAME}_strip.xtc"
 
@@ -44,9 +43,7 @@ printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${WHOL
   -n index.ndx -pbc whole -dt "${MD_LENGTH}" -novel -ndec 2
 printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${MDNAME}.tpr" -o "${NOJUMP_XTC}" \
   -n index.ndx -pbc nojump -center -ndec 2
-printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${MDNAME}.tpr" \
-  -o "${FIT_XTC}" -n index.ndx -fit progressive -center -ndec 2
-printf "Backbone\nSystem\n" | gmx trjconv -s "${MDNAME}.tpr" -f "${FIT_XTC}" -o "${NOROT_XTC}" \
+printf "Backbone\nSystem\n" | gmx trjconv -s "${MDNAME}.tpr" -f "${NOJUMP_XTC}" -o "${NOROT_XTC}" \
   -n index.ndx -fit rot+trans -ndec 2
 
 # Strip water and ions

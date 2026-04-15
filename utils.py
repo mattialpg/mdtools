@@ -95,7 +95,7 @@ def write_config_file(preprocess_dict):
         'vina': preprocess_dict.get('vina', TOOL_PATHS['vina'])}
         
     config_text = yaml.safe_dump(configs, sort_keys=False)
-    for key in ('ligands:', 'workdir:'):
+    for key in ('ligands:', 'box_center:', 'workdir:'):
         config_text = config_text.replace(f"\n{key}", f"\n\n{key}")
     config_file.write_text(config_text)
 
