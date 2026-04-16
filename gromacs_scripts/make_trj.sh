@@ -39,7 +39,7 @@ if [[ ! -s "${MDNAME}.gro" ]]; then
   echo "0" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${MDNAME}.gro" -dump -1
 fi
 
-# Strip water and ions
+# Prepare stripped files
 echo -e "q" | gmx make_ndx -f wrapped.gro -o index.ndx
 echo -e '"non-Water" & ! "K" & ! "CL"\nq' | gmx make_ndx -f wrapped.gro \
   -o index.ndx -n index.ndx

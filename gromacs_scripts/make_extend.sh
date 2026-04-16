@@ -39,7 +39,7 @@ ORIG_NS="${MDNAME##*_}"
 TOTAL_NS="$(awk -v A="$ORIG_NS" -v B="$EXTEND_NS" 'BEGIN { printf "%.0f", (A+B) }')"
 NEW_MDNAME="md_${TOTAL_NS}"
 EXTEND_PS="$(awk -v X="$EXTEND_NS" 'BEGIN { printf "%.0f", (X*1000.0) }')"
-NOTIFY_TEXT="Extended ${MDNAME} by ${EXTEND_NS} ns -> ${NEW_MDNAME}"
+NOTIFY_TEXT="MD successfully extended by ${EXTEND_NS} ns"
 
 # Extend dynamics
 log " > Continuing simulation (appending to existing files)..."

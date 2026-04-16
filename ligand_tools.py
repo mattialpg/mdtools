@@ -1,6 +1,41 @@
+import sys
 from pathlib import Path
 import subprocess
+import json
 from pymol2 import PyMOL
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+MOLGPKA_PYTHON = "/home/mattia/.miniforge/envs/molgpka/bin/python"
+MOLGPKA_SRC = "/home/mattia/.bin/molgpka/src"
+
+
+def _molgpka_states(ligand_smiles, ph=7.4, tph=0.3):
+    code = (
+        "import sys, json\n"
+        f"sys.path.insert(0, {MOLGPKA_SRC!r})\n"
+        "from protonate import protonate_mol\n"
+        "smi = sys.argv[1]\n"
+        "ph = float(sys.argv[2])\n"
+        "tph = float(sys.argv[3])\n"
+        "states = protonate_mol(smi, ph, tph)\n"
+        "print(json.dumps(states))\n"
+    )
+    proc = subprocess.run(
+        [MOLGPKA_PYTHON, "-c", code, ligand_smiles, str(ph), str(tph)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(proc.stdout.strip() or "[]")
+
+
+def check_ionisation(ligand_smiles, ph=7.4):
+    states = _molgpka_states(ligand_smiles, ph=ph, tph=0.3)
+    if not states:
+        return ligand_smiles
+    chosen = Chem.MolToSmiles(Chem.MolFromSmiles(states[0]))
+    return chosen
 
 
 def prepare_ligand(configs):
@@ -12,9 +47,6 @@ def prepare_ligand(configs):
         ligand_cfg = ligands[0]
     elif isinstance(ligands, dict):
         ligand_cfg = ligands
-    elif isinstance(configs.get("ligand"), dict):
-        # Backward compatibility for old singular schema.
-        ligand_cfg = configs["ligand"]
 
     ligand_id = configs.get("ligand_id") or ligand_cfg.get("id")
     ligand_name = configs.get("ligand_name") or ligand_cfg.get("name") or "ligand"
@@ -24,6 +56,16 @@ def prepare_ligand(configs):
     print(f"Preparing ligand {ligand_id}")
     sdf_free = workdir / f"{ligand_name}_free.sdf"
     pdbqt_free = workdir / f"{ligand_name}_free.pdbqt"
+    
+    # mol = Chem.MolFromSmiles(ligand_smiles)
+    # mol = Chem.AddHs(mol)
+    # AllChem.EmbedMolecule(mol, randomSeed=1)
+    # # AllChem.UFFOptimizeMolecule(mol)
+    # writer = Chem.SDWriter(str(sdf_free))
+    # writer.write(mol)
+    # writer.close()
+
+    # sys.exit(0)
 
     subprocess.run([obabel, f"-:{ligand_smiles}", "-O", str(sdf_free), "--gen3d"],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -32,6 +74,7 @@ def prepare_ligand(configs):
 
     print(f"Ligand prepared: {pdbqt_free}")
     return pdbqt_free
+
 
 def extract_ligand(ligand_id, pdb_id, sdf_outfile):
     """Extract ligand from receptor PDB and save as SDF."""

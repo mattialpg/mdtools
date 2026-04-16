@@ -89,6 +89,11 @@ class Preprocess:
                     ligand_tools.extract_ligand(key, self.pdb_id, f"ligand{i}.sdf")
 
 
+    def check_ionisation(self):
+        self.lig_new_smiles = ligand_tools.check_ionisation(self.lig_new_smiles)
+        self.ligands[0]["smiles"] = self.lig_new_smiles
+
+
     def get_box(self):
         pymol_commands = (
             f"run /home/mattia/mdtools/pymol_scripts/draw_bounding_box.py;"
@@ -164,63 +169,36 @@ class DockingPipeline:
             str(self.workdir / f"{self.docked_name}_0*.sdf")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Add hydrogens using PyMOL
-        pymol_script = self.workdir / 'add_hydrogens.pml'
+        # Remove hydrogens using PyMOL (the only reliable way)
+        pymol_script = self.workdir / 'remove_hydrogens.pml'
         with pymol_script.open('w') as pml:
             for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
-                pml.write(f"load {f}, lig; h_add lig; save {f}, lig; delete lig;\n")
+                pml.write(f"load {f}, lig; remove (lig and hydro); save {f}, lig; delete lig;\n")
             pml.write('quit\n')
         subprocess.run([self.pymol, '-cq', '-r', str(pymol_script)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         pymol_script.unlink()
 
-        # Fix bond order/aromaticity
-        sdf_free = self.workdir / f"{self.ligand_name}_free.sdf"
-        template = Chem.MolFromMolFile(str(sdf_free), sanitize=True, removeHs=False)
+        template = Chem.MolFromSmiles(self.ligand_smiles)
+
         for f in self.workdir.glob(f"{self.docked_name}_0*.sdf"):
-            pose = Chem.MolFromMolFile(str(f), sanitize=True, removeHs=False)
-            if pose is None:
-                raise ValueError(f"Could not parse docked pose file: {f}")
+            pose = Chem.MolFromMolFile(str(f), sanitize=False)
 
-            fixed = None
-            if template is not None:
-                match = pose.GetSubstructMatch(template)
-                if match and len(match) == template.GetNumAtoms():
-                    try:
-                        reordered = Chem.RenumberAtoms(pose, list(match))
-                        fixed = AllChem.AssignBondOrdersFromTemplate(template, reordered)
-                    except Exception as exc:
-                        self.logger.warning(
-                            f"Could not transfer bond orders for {f.name}: {exc}"
-                        )
-                else:
-                    self.logger.warning(
-                        f"Template/pose atom mapping failed for {f.name}; "
-                        "keeping OpenBabel bond orders."
-                    )
-            else:
-                self.logger.warning(
-                    "Template ligand_free.sdf could not be parsed; "
-                    "keeping OpenBabel bond orders."
-                )
+            # Fix bond order/aromaticity
+            fixed_pose = AllChem.AssignBondOrdersFromTemplate(template, pose)
 
-            Chem.MolToMolFile(fixed if fixed is not None else pose, str(f.with_suffix('.sdf')))
+            # Reorder atoms to match template
+            match = fixed_pose.GetSubstructMatch(template)
+            reordered_pose = Chem.RenumberAtoms(fixed_pose, list(match))
+
+            # Build pose on template graph, then force docked coords
+            checked_pose = Chem.Mol(template)
+            checked_pose.AddConformer(Chem.Conformer(reordered_pose.GetConformer()))
+            checked_pose = Chem.AddHs(checked_pose, addCoords=True)
+
+            Chem.MolToMolFile(checked_pose, str(f.with_suffix('.sdf')))
             subprocess.run(["sed", "-i", f"2c\\{self.ligand_md_id}", str(f.with_suffix(".sdf"))],
                 check=True)
-
-        # # Fix MOL2 files
-        # perl_script = Path(__file__).parent / 'sort_mol2_bonds.pl'
-        # for f in self.workdir.glob(f"{self.docked_name}_0*.mol2"):
-        #     # Remove non-standard header lines
-        #     subprocess.run(['sed', '-i', '1{/^#/d;}', str(f)], check=True)
-
-        #     # Sort bonds with Perl script
-        #     subprocess.run(['perl', str(perl_script), str(f), str(f)],
-        #         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        #     # Fix ligand name
-        #     pattern = Rf"s/\b\(UNL\|{self.ligand_md_id}\)[[:space:]]*[0-9]*/{self.ligand_md_id}/g"
-        #     subprocess.run(['sed', '-i', pattern, str(f)], check=True)
 
         result_dir = self.workdir / f"{self.ligand_name}.vina"
         if result_dir.exists():
@@ -270,6 +248,7 @@ if __name__ == '__main__':
         try:
             prep = Preprocess(receptor_id, ligand_id, ligand_smiles)
             prep.choose_ligands()
+            prep.check_ionisation()
             prep.get_box()
             config_file = Path("config.yaml")
             utils.write_config_file(dict(prep.__dict__))
