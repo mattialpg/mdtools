@@ -38,4 +38,4 @@ sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
 gmx pairdist -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -n pocket.ndx \
   -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel "group \"${LIG}\"" -type min
 
-python ~/mdtools/interaction_analysis.py --trj_name "${TRJNAME}_strip"
+python ~/mdtools/interaction_analysis.py --trj_name "${TRJNAME}_fit"

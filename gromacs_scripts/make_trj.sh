@@ -29,27 +29,35 @@ TRJNAME="trj_${MD_LENGTH}"
 # Use temporary storage for intermediate trajectory files
 WORK_TMPDIR="${TMPDIR:-/tmp}"
 RUN_TMPDIR="$(mktemp -d "${WORK_TMPDIR%/}/make_trj.XXXXXX")"
-WHOLE_XTC="${RUN_TMPDIR}/${TRJNAME}_whole.xtc"
-NOJUMP_XTC="${RUN_TMPDIR}/${TRJNAME}_nojump.xtc"
-NOROT_XTC="${RUN_TMPDIR}/${TRJNAME}_norot.xtc"
+WHOLE_XTC="${TRJNAME}_whole.xtc"
+NOJUMP_XTC="${TRJNAME}_nojump.xtc"
+NOROT_XTC="${TRJNAME}_norot.xtc"
+FIT_XTC="${TRJNAME}_fit.xtc"
 STRIP_XTC="${TRJNAME}_strip.xtc"
 
 if [[ ! -s "${MDNAME}.gro" ]]; then
   echo "0" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${MDNAME}.gro" -dump -1
 fi
 
-# Extract fitted trajectory
-printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -o "${WHOLE_XTC}" \
-  -n index.ndx -pbc whole -dt "${MD_LENGTH}" -novel -ndec 2
-printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${MDNAME}.tpr" -o "${NOJUMP_XTC}" \
-  -n index.ndx -pbc nojump -center -ndec 2
-printf "Backbone\nSystem\n" | gmx trjconv -s "${MDNAME}.tpr" -f "${NOJUMP_XTC}" -o "${NOROT_XTC}" \
-  -n index.ndx -fit rot+trans -ndec 2
-
 # Strip water and ions
-echo -e '!"Water_and_ions"\nq'| gmx make_ndx -f ${MDNAME}.gro -o index.ndx
-echo '!Water_and_ions' | gmx trjconv -f "${NOROT_XTC}" -s "${MDNAME}.tpr" \
-  -n index.ndx -dump -1 -o "${TRJNAME}_strip.gro"
-echo '!Water_and_ions' | gmx trjconv -f "${NOROT_XTC}" -s "${MDNAME}.tpr" \
-  -n index.ndx -o "${STRIP_XTC}" -ndec 2
+echo -e "q" | gmx make_ndx -f wrapped.gro -o index.ndx
+echo -e '"non-Water" & ! "K" & ! "CL"\nq' | gmx make_ndx -f wrapped.gro \
+  -o index.ndx -n index.ndx
+echo 'non-Water_&_!K_&_!CL' | gmx trjconv -f wrapped.gro -s "${MDNAME}.tpr" \
+  -o "${TRJNAME}_strip.gro" -n index.ndx
+echo "non-Water_&_!K_&_!CL" | gmx convert-tpr -s "${MDNAME}.tpr" \
+  -o "${TRJNAME}_strip.tpr" -n index.ndx
+echo -e "q" | gmx make_ndx -f "${TRJNAME}_strip.gro" -o strip.ndx
+
+# Extract fitted trajectory
+printf "non-Water_&_!K_&_!CL\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" \
+  -o "${WHOLE_XTC}" -n index.ndx -pbc whole -dt "${MD_LENGTH}" -novel -ndec 2
+printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${TRJNAME}_strip.tpr" \
+  -o "${NOJUMP_XTC}" -n strip.ndx -pbc nojump -center -ndec 2
+printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${TRJNAME}_strip.tpr" \
+  -o "${FIT_XTC}" -n strip.ndx -fit progressive -center -ndec 2
+printf "Backbone\nSystem\n" | gmx trjconv -f "${FIT_XTC}" -s "${TRJNAME}_strip.tpr" \
+  -o "${NOROT_XTC}" -n strip.ndx -fit rot+trans -ndec 2
+printf "System\n" | gmx trjconv -f "${NOROT_XTC}" -s "${TRJNAME}_strip.tpr" \
+  -o "${STRIP_XTC}" -n strip.ndx -ndec 2
 rm -rf "${RUN_TMPDIR}"
