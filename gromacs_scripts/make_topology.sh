@@ -70,7 +70,7 @@ EOF
   tleap -f tleap_topology.in
 
   log " >  Converting ${LIGAND_NAME} to GROMACS topology..."
-  acpype -i "${output_name}.mol2" 2> >(grep -Ev \
+  acpype -i "${output_name}.mol2" -n "${ligand_charge}" 2> >(grep -Ev \
   "OpenBabel|Open Babel|Cannot perform atom type translation|
   This Mol2 file is non-standard|Cannot interpret atom type|
   ==============================" >&2)
