@@ -1,4 +1,4 @@
 __pycache__/
 *.pyc
-mdtools.egg-info/
 .vscode/
+docking_pipeline/__pycache__

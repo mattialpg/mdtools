@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 
-import utils, palettes
+import tools.utils as utils, visualisation.palettes as palettes
 
 sys.path.append('/home/mattia/aiddtools')
 import interaction_tools as inttools
@@ -23,7 +23,7 @@ class TimeSeriesAnalysis:
     def __init__(self, trj_name, config_path='config.yaml'):
         self.configs = utils.read_config_file(config_path)
         self.ligand_name = self.configs['ligand_name']
-        self.ligand_md_id = self.configs['ligand_md_id']
+        self.ligand_resname = self.configs['ligand_resname']
         self.pdb_id = self.configs['receptor_id']
         self.trj_name = trj_name
 
@@ -60,7 +60,7 @@ class TimeSeriesAnalysis:
             xanchor='left', yanchor='middle', len=1.048)
 
         int_priority = {name: idx for idx, name in enumerate(self.int_types)}
-        df_lig = df_int[df_int['LIGNAME'] == self.ligand_md_id].copy()
+        df_lig = df_int[df_int['LIGNAME'] == self.ligand_resname].copy()
         # Preserve frame order from the source table (do this before priority sorting).
         all_pdb = pd.Index(pd.unique(df_lig['PDB']), name='PDB')
         df_lig['RESID'] = df_lig['RESID'].replace({'NA': np.nan, 'NANA': np.nan})
@@ -123,7 +123,7 @@ class TimeSeriesAnalysis:
                 height=500, width=1100,
                 margin=dict(l=100, r=50, t=65, b=0),
                 title=dict(
-                    text=f"Interaction occupancy ({self.pdb_id}-{self.ligand_md_id})",
+                    text=f"Interaction occupancy ({self.pdb_id}-{self.ligand_resname})",
                     x=0.5, y=0.95, xanchor='center', yanchor='top',
                     font=dict(size=20, weight='bold')),
                 plot_bgcolor='#C9D0D6',

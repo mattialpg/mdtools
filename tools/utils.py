@@ -75,11 +75,14 @@ def get_tool_paths(config_file=Path("config.yaml")):
 def write_config_file(preprocess_dict):
     cwd = Path.cwd()
     config_file = Path('config.yaml')
+    protein = preprocess_dict.get('protein')
+    if not isinstance(protein, dict):
+        protein = {
+            'id': preprocess_dict['receptor_id'],
+            'name': preprocess_dict['receptor_name'],}
 
     configs = {
-        'protein': {
-            'id': preprocess_dict['receptor_id'],
-            'name': preprocess_dict['receptor_name']},
+        'protein': protein,
         
         "ligands": preprocess_dict["ligands"],
 
@@ -125,12 +128,12 @@ def read_config_file(config_file=Path("config.yaml")):
             configs["ligand_smiles"] = ligand["smiles"]
         if ligand.get("name") and not configs.get("ligand_name"):
             configs["ligand_name"] = ligand["name"]
-        if ligand.get("md_id") and not configs.get("ligand_md_id"):
-            configs["ligand_md_id"] = ligand["md_id"]
+        if ligand.get("resname") and not configs.get("ligand_resname"):
+            configs["ligand_resname"] = ligand["resname"]
 
     configs.setdefault("receptor_name", "protein")
     configs.setdefault("ligand_name", "ligand")
-    configs.setdefault("ligand_md_id", "LIG")
+    configs.setdefault("ligand_resname", "LIG")
 
     receptor_id = configs.get("receptor_id")
     if receptor_id:
@@ -158,7 +161,7 @@ def read_config_file(config_file=Path("config.yaml")):
         "id": configs.get("ligand_id"),
         "smiles": configs.get("ligand_smiles"),
         "name": configs.get("ligand_name"),
-        "md_id": configs.get("ligand_md_id"),
+        "resname": configs.get("ligand_resname"),
     }
     configs["ligands"] = [ligand_entry]
     # Backward compatibility for code paths that still read singular key.

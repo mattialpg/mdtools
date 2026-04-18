@@ -12,9 +12,9 @@ def tuple_as_literal(dumper, data):
     return dumper.represent_scalar('tag:yaml.org,2002:str', str(data))
 yaml.SafeDumper.add_representer(tuple, tuple_as_literal)
 
-import receptor_tools
-import ligand_tools
-import utils
+import old.receptor_tools as receptor_tools
+import old.ligand_tools as ligand_tools
+import tools.utils as utils
 
 # Import AIDDTools utils
 sys.path.append('/home/mattia/aiddtools')
@@ -24,6 +24,7 @@ import interaction_tools as inttools
 class Preprocess:
     def __init__(self, receptor_id, lig_new_id, lig_new_smiles):
         self.logger = logging.getLogger(__name__)
+        self.workdir = Path.cwd()
 
         self.receptor_name = 'protein'
         self.receptor_id = receptor_id
@@ -35,10 +36,10 @@ class Preprocess:
         self.lig_new_id = lig_new_id
         self.lig_new_smiles = lig_new_smiles
         self.ligand_name = 'ligand'
-        self.lig_new_md_id = 'LIG'
+        self.lig_new_resname = 'LIG'
 
         self.ligands = [{"id": self.lig_new_id, "smiles": self.lig_new_smiles,
-            "name": self.ligand_name, "md_id": self.lig_new_md_id, "role": "docked"}]
+            "name": self.ligand_name, "resname": self.lig_new_resname, "role": "docked"}]
         
         tool_paths = utils.get_tool_paths()
         self.pymol = tool_paths['pymol']
@@ -46,7 +47,7 @@ class Preprocess:
         self.vina = tool_paths['vina']
 
 
-    def choose_ligands(self):
+    def select_cognate_lig(self):
         ligands = inttools.get_ligands(f"{self.pdb_id}.pdb")
         if not ligands:
             self.logger.warning(f"No ligands detected in {self.pdb_id}.pdb")
@@ -68,7 +69,7 @@ class Preprocess:
         choice = int(input("\nSelect a ligand to replace: ").strip())
 
         keys = list(sorted_ligands)
-        self.lig_orig_id, self.chain, _ = keys[choice - 1].split(':')
+        self.cognate_lig_id, self.chain, _ = keys[choice - 1].split(':')
 
         self.receptor_id = f"{self.pdb_id}:{self.chain}"
         if self.domain is not None:
@@ -85,20 +86,25 @@ class Preprocess:
                     key = keys[idx - 1]
                     _, smiles = ligands[key]
                     self.ligands.append({"id": key, "smiles": smiles,
-                        "name": f"ligand{i}", "md_id": key.split(':')[0], "role": "kept"})
+                        "name": f"ligand{i}", "resname": key.split(':')[0], "role": "kept"})
                     ligand_tools.extract_ligand(key, self.pdb_id, f"ligand{i}.sdf")
 
 
     def check_ionisation(self):
-        self.lig_new_smiles = ligand_tools.check_ionisation(self.lig_new_smiles)
-        self.ligands[0]["smiles"] = self.lig_new_smiles
+        print("Calculating protonation states...")
+        result_dir = self.workdir / f"{self.ligand_name}.unipka"
+        result_dir.mkdir(exist_ok=True)
+        smi = ligand_tools.check_ionisation(self.lig_new_smiles,
+            report_file=result_dir / "unipka_report.txt")
+        self.lig_new_smiles = smi
+        self.ligands[0]["smiles"] = smi
 
 
     def get_box(self):
         pymol_commands = (
             f"run /home/mattia/mdtools/pymol_scripts/draw_bounding_box.py;"
             f"load {self.pdb_id}.pdb, prot;"
-            f"select lig, chain {self.chain} and resn {self.lig_orig_id};"
+            f"select lig, chain {self.chain} and resn {self.cognate_lig_id};"
             f"draw_bounding_box lig")
         result = subprocess.run([self.pymol, '-cqd', pymol_commands],
             check=True, capture_output=True, text=True).stdout.strip()
@@ -197,7 +203,7 @@ class DockingPipeline:
             checked_pose = Chem.AddHs(checked_pose, addCoords=True)
 
             Chem.MolToMolFile(checked_pose, str(f.with_suffix('.sdf')))
-            subprocess.run(["sed", "-i", f"2c\\{self.ligand_md_id}", str(f.with_suffix(".sdf"))],
+            subprocess.run(["sed", "-i", f"2c\\{self.ligand_resname}", str(f.with_suffix(".sdf"))],
                 check=True)
 
         result_dir = self.workdir / f"{self.ligand_name}.vina"
@@ -216,7 +222,7 @@ class DockingPipeline:
 
 if __name__ == '__main__':
     import argparse
-    import utils
+    import tools.utils as utils
     original_cwd = os.getcwd()
 
     parser = argparse.ArgumentParser(description="Run a redocking workflow")
@@ -247,7 +253,7 @@ if __name__ == '__main__':
         os.chdir(workdir)
         try:
             prep = Preprocess(receptor_id, ligand_id, ligand_smiles)
-            prep.choose_ligands()
+            prep.select_cognate_lig()
             prep.check_ionisation()
             prep.get_box()
             config_file = Path("config.yaml")

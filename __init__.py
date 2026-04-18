@@ -1,5 +1,3 @@
-from .utils import *
-from .receptor_tools import *
-from .docking_session import *
+from .tools.utils import *
 
 __all__ = []

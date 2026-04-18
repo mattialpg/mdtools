@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 import requests
-import utils
+import tools.utils as utils
 
 
 def cmd_download_pdb(args):
