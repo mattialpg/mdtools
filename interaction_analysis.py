@@ -19,16 +19,11 @@ sys.path.append('/home/mattia/aiddtools')
 import interaction_tools as inttools
 
 
-class TimeSeriesAnalysis:
-    def __init__(self, trj_name, config_path='config.yaml'):
-        self.configs = utils.read_config_file(config_path)
-        self.ligand_name = self.configs['ligand_name']
-        self.ligand_resname = self.configs['ligand_resname']
-        self.pdb_id = self.configs['receptor_id']
-        self.trj_name = trj_name
-
+class OccupancyAnalysis:
+    def __init__(self, trj_name, configs):
+        self.configs = configs
         self.workdir = Path(self.configs['workdir'])
-        self.int_dir = self.workdir / f'{self.ligand_name}.interactions'
+        self.frame_dir = self.workdir / 'complex.frames'
         self.int_types = ['hydrophobic', 'hbond', 'waterbridge',
             'saltbridge', 'pistacking', 'pication', 'halogen', 'metal']
 
@@ -38,7 +33,7 @@ class TimeSeriesAnalysis:
             input("Press Enter to continue...\n")
 
         print("Loading trajectory...")
-        self.traj = md.load_xtc(f'{self.trj_name}.xtc', top=f'{self.trj_name}.gro')
+        self.traj = md.load_xtc(f'{trj_name}.xtc', top=f'{trj_name}.gro')
 
     def extract_frames(self):
         total_frames = self.traj.n_frames
@@ -46,22 +41,15 @@ class TimeSeriesAnalysis:
         frame_indices = np.linspace(0, total_frames - 1, max_frames, dtype=int)\
             if total_frames >= max_frames else np.arange(total_frames)
         for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit='frame')):
-            self.traj[idx].save_pdb(f'{self.int_dir}/frame_{i+1:04d}.pdb')
+            self.traj[idx].save_pdb(f'{self.frame_dir}/frame_{i+1:04d}.pdb')
 
         # subprocess.run(['gmx', 'trjconv', '-f', f'{self.trj_name}.xtc',
         #     '-s', f'{self.trj_name}.gro', '-o', f'{self.int_dir}/frame_.pdb',
         #     '-sep', '-nzero', '4'], input="System\n", text=True, check=True)
 
-
-    def make_occupancy_trace(self, df_int):
-        dcolorsc, colorbar_cfg = palettes.discrete_colorscale(
-            'geodataviz_diverging_1', self.int_types)
-        colorbar_cfg = dict(colorbar_cfg, x=1.0, y=0.5,
-            xanchor='left', yanchor='middle', len=1.048)
-
+    def pivot_df(self, df_lig):
+        # Preserve frame order from the source table
         int_priority = {name: idx for idx, name in enumerate(self.int_types)}
-        df_lig = df_int[df_int['LIGNAME'] == self.ligand_resname].copy()
-        # Preserve frame order from the source table (do this before priority sorting).
         all_pdb = pd.Index(pd.unique(df_lig['PDB']), name='PDB')
         df_lig['RESID'] = df_lig['RESID'].replace({'NA': np.nan, 'NANA': np.nan})
         df_lig['INT_TYPE'] = df_lig['INT_TYPE'].where(
@@ -89,11 +77,27 @@ class TimeSeriesAnalysis:
             # Keep 12 most populated residues
             top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
             df_pivot = df_pivot[top_populated]
+        
+        return df_pivot
+
+
+    def make_occupancy_trace(self, df_pivot):
+        dcolorsc, colorbar_cfg = palettes.discrete_colorscale(
+            'geodataviz_diverging_1', self.int_types)
+        colorbar_cfg = dict(colorbar_cfg, x=1.0, y=0.5,
+            xanchor='left', yanchor='middle', len=1.048)
+        
+        # Render missing values as grey
+        left = abs(-0.01) / (len(self.int_types) + abs(-0.01))
+        dcolorsc = [[left + x * (1.0 - left), c] for x, c in dcolorsc]
+        dcolorsc = [[0.0, '#C9D0D6'], [left, '#C9D0D6']] + dcolorsc
 
         # Build time vector scaled to number of displayed frames
         total_time_ns = self.traj.time[-1] / 1000
         n_frames = len(df_pivot.index)
         time_ns = np.linspace(0, total_time_ns, n_frames)
+        dt = time_ns[1] - time_ns[0] if len(time_ns) > 1 else 1.0
+        x_range = [time_ns[0] - dt/2, time_ns[-1] + dt/2]
 
         if df_pivot.shape[1] == 0:
             y_vals = np.array(['No interactions'])
@@ -107,13 +111,15 @@ class TimeSeriesAnalysis:
         if valid.any():
             int_labels = np.array(self.int_types, dtype=object)
             customdata[valid] = int_labels[z_vals[valid].astype(int)]
+        z_vals = np.where(valid, z_vals + 1e-6, -0.01)
 
         trace = go.Heatmap(
             x=time_ns, 
             y=y_vals,
             z=z_vals,
             colorscale=dcolorsc,
-            zmin=0, zmax=len(self.int_types),
+            zsmooth=False,
+            zmin=-0.01, zmax=len(self.int_types),
             colorbar=colorbar_cfg, name='Occupancy',
             customdata=customdata,
             hovertemplate="Time=%{x:.2f} ns<br>Residue=%{y}<br>Interaction=%{customdata}<extra></extra>")
@@ -128,14 +134,14 @@ class TimeSeriesAnalysis:
                     font=dict(size=20, weight='bold')),
                 plot_bgcolor='#C9D0D6',
                 hovermode='closest'),
-            'xaxis_params': dict(showgrid=False, showticklabels=False),
+            'xaxis_params': dict(showgrid=False, showticklabels=False, range=x_range),
             'yaxis_params': dict(
                 title_text='<b>Residue</b>', tickmode='linear',
                 showgrid=False),}
         return trace
 
 
-    def _read_xvg_series(self, xvg_path, y_col, empty_msg):
+    def _read_xvg_series(self, xvg_path, y_col):
         xvg_path = Path(xvg_path)
         rows = []
         with xvg_path.open() as handle:
@@ -153,7 +159,7 @@ class TimeSeriesAnalysis:
 
         series_df = pd.DataFrame(rows, columns=['time_ns', y_col])
         if series_df.empty:
-            raise ValueError(f'{empty_msg} {xvg_path}')
+            raise ValueError(f'No data found in {xvg_path}')
 
         max_frames = 1001
         indices = np.linspace(0, len(series_df) - 1, max_frames, dtype=int) \
@@ -172,8 +178,7 @@ class TimeSeriesAnalysis:
 
 
     def make_rmsd_trace(self):
-        rmsd_df = self._read_xvg_series(
-            'trj_rmsd_lig.xvg', 'rmsd_nm', 'No RMSD data found in')
+        rmsd_df = self._read_xvg_series('trj_rmsd_lig.xvg', 'rmsd_nm')
         trace = self._make_line_trace(
             rmsd_df, 'rmsd_nm', '#1A2228', 'RMSD (nm)',
             'RMSD=%{y:.3f} nm<extra></extra>')
@@ -202,8 +207,7 @@ class TimeSeriesAnalysis:
 
 
     def make_distance_trace(self):
-        dist_df = self._read_xvg_series(
-            'trj_dist_lig.xvg', 'dist_nm', 'No distance data found in')
+        dist_df = self._read_xvg_series('trj_dist_lig.xvg', 'dist_nm')
         trace = self._make_line_trace(
             dist_df, 'dist_nm', '#B03060', 'Distance (nm)',
             'Distance=%{y:.3f} nm<extra></extra>')
@@ -252,10 +256,6 @@ class TimeSeriesAnalysis:
 
         html = (pio.to_html(fig1, include_plotlyjs='cdn', full_html=False, div_id='occ') +
             pio.to_html(fig2, include_plotlyjs=False, full_html=False, div_id='lines'))
-        html_path = self.int_dir.parent / 'trj_occupancy.html'
-        with html_path.open('w') as f:
-            f.write(html)
-        print(f"Saved {html_path.name}")
 
         # Generate PNG layout
         png_fig = make_subplots(
@@ -310,28 +310,30 @@ class TimeSeriesAnalysis:
             colorbar=dict(x=occ_xmax, y=occ_center, len=occ_height,
             yanchor='middle', thickness=18))
 
-        png_path = self.int_dir.parent / 'trj_occupancy.png'
-        png_fig.write_image(png_path, scale=3)
-        print(f"Saved {png_path.name}")
+        return html, png_fig
 
 
-    def run(self):
-        int_csv = self.int_dir / 'interactions.csv'
-        if not self.int_dir.exists():
-            self.int_dir.mkdir(parents=True, exist_ok=True)
+    def run_analysis(self):
+        int_csv = self.frame_dir / 'interactions.csv'
+        if not self.frame_dir.exists():
+            self.frame_dir.mkdir(parents=True, exist_ok=True)
             self.extract_frames()
         if not int_csv.exists():
-            pdb_files = glob.glob(f"{self.int_dir}/*.pdb")
+            pdb_files = glob.glob(f"{self.frame_dir}/*.pdb")
             df_int = inttools.analyse_pdb_files(pdb_files)
             df_int.to_csv(int_csv, index=False)
         else:
             print(f"Using file {int_csv}...")
             df_int = pd.read_csv(int_csv)
+        return df_int
+        
 
-        occupancy_trace = self.make_occupancy_trace(df_int)
+    def plot_analysis(self, df_pivot):
+        occupancy_trace = self.make_occupancy_trace(df_pivot)
         rmsd_trace = self.make_rmsd_trace()
         distance_trace = self.make_distance_trace()
-        self.plot_occupancy(occupancy_trace, rmsd_trace, distance_trace)
+        html, png = self.plot_occupancy(occupancy_trace, rmsd_trace, distance_trace)
+        return html, png
 
 
 if __name__ == '__main__':
@@ -340,5 +342,33 @@ if __name__ == '__main__':
         help="Trajectory file name for time series analysis")
     args = parser.parse_args()
 
-    time_analysis = TimeSeriesAnalysis(trj_name=args.trj_name)
-    time_analysis.run()
+    configs = utils.read_config_file('config.yaml')
+    workdir = Path(configs['workdir'])
+
+    occ = OccupancyAnalysis(args.trj_name, configs)
+    df_int = occ.run_analysis()
+
+    for dct in configs['ligands']:
+        lig_name = dct.get('name', 'ligand')
+        lig_resname = dct.get('md_id', dct.get('resname', 'LIG'))
+        int_dir = workdir / f'{lig_name}.interactions'
+        int_dir.mkdir(parents=True, exist_ok=True)
+
+        df_lig = df_int[df_int['RESNAME'] == lig_resname].reset_index(drop=True)
+        if df_lig.empty:
+            continue
+        df_lig.to_csv(int_dir / 'interactions.csv', index=False)
+        df_pivot = occ.pivot_df(df_lig)
+
+        occ.pdb_id = configs['receptor_id']
+        occ.ligand_resname = lig_resname
+        html, png = occ.plot_analysis(df_pivot)
+
+        html_path = workdir / f"trj_occupancy_{lig_resname}.html"
+        with html_path.open('w') as f:
+            f.write(html)
+        print(f"Saved {html_path.name}")
+
+        png_path = workdir / f"trj_occupancy_{lig_resname}.png"
+        png.write_image(png_path, scale=3)
+        print(f"Saved {png_path.name}")

@@ -17,7 +17,7 @@ class CrossTargetAnalysis:
         for file in self.pdb_files:
             ligs = inttools.get_ligands(file, select_loi=True)
             lig_cci.update([x.split(':')[0] for x in ligs.keys()])
-        df_int = df_int[df_int['LIGNAME'].isin(lig_cci)]
+        df_int = df_int[df_int['RESNAME'].isin(lig_cci)]
         df_int.to_csv('df_int.csv', index=False)
 
         # Count co-occurrences across receptors

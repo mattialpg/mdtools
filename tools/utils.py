@@ -111,29 +111,30 @@ def read_config_file(config_file=Path("config.yaml")):
 
     protein = configs.get("protein") or {}
     ligands = configs.get("ligands")
-    ligand = {}
-    if isinstance(ligands, list) and ligands and isinstance(ligands[0], dict):
-        ligand = ligands[0]
-    elif isinstance(ligands, dict):
-        ligand = ligands
+
+    def normalise_ligands(ligand_data):
+        ligands_list = []
+        if isinstance(ligand_data, list):
+            for entry in ligand_data:
+                if not isinstance(entry, dict):
+                    continue
+                ligands_list.append(dict(entry))
+        elif isinstance(ligand_data, dict):
+            # If values are dicts, assume already a mapping of ligands.
+            if ligand_data and all(isinstance(v, dict) for v in ligand_data.values()):
+                ligands_list = [dict(v) for v in ligand_data.values()]
+            else:
+                ligands_list = [dict(ligand_data)]
+        return ligands_list
+
+    ligands_list = normalise_ligands(ligands)
     if isinstance(protein, dict):
         if protein.get("id") and not configs.get("receptor_id"):
             configs["receptor_id"] = protein["id"]
         if protein.get("name") and not configs.get("receptor_name"):
             configs["receptor_name"] = protein["name"]
-    if isinstance(ligand, dict):
-        if ligand.get("id") and not configs.get("ligand_id"):
-            configs["ligand_id"] = ligand["id"]
-        if ligand.get("smiles") and not configs.get("ligand_smiles"):
-            configs["ligand_smiles"] = ligand["smiles"]
-        if ligand.get("name") and not configs.get("ligand_name"):
-            configs["ligand_name"] = ligand["name"]
-        if ligand.get("resname") and not configs.get("ligand_resname"):
-            configs["ligand_resname"] = ligand["resname"]
 
     configs.setdefault("receptor_name", "protein")
-    configs.setdefault("ligand_name", "ligand")
-    configs.setdefault("ligand_resname", "LIG")
 
     receptor_id = configs.get("receptor_id")
     if receptor_id:
@@ -157,15 +158,10 @@ def read_config_file(config_file=Path("config.yaml")):
         "id": configs.get("receptor_id"),
         "name": configs.get("receptor_name"),
     }
-    ligand_entry = {
-        "id": configs.get("ligand_id"),
-        "smiles": configs.get("ligand_smiles"),
-        "name": configs.get("ligand_name"),
-        "resname": configs.get("ligand_resname"),
-    }
-    configs["ligands"] = [ligand_entry]
-    # Backward compatibility for code paths that still read singular key.
-    configs["ligand"] = ligand_entry
+    # Keep all ligands as list-of-dicts.
+    if not ligands_list:
+        ligands_list = [{"name": "ligand", "md_id": "LIG"}]
+    configs["ligands"] = ligands_list
 
     return configs
 
