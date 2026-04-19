@@ -1,0 +1,22 @@
+source leaprc.protein.ff19SB
+source leaprc.gaff2
+source leaprc.water.opc
+set default PBRadii mbondi2
+loadOff atomic_ions.lib
+loadamberparams frcmod.ionslm_1264_opc
+
+pro = loadpdb protein.pdb 
+
+bond pro.235.SG pro.367.SG
+bond pro.449.SG pro.454.SG
+
+saveamberparm pro pro_solv.parm7 pro_solv.rst7
+savepdb pro pro_gas.pdb
+charge pro
+addions2 pro Na+ 0
+solvateoct pro OPCBOX 11.0
+saveamberparm pro pro_solv.parm7 pro_solv.rst7
+savepdb pro pro_solv.pdb
+
+quit
+

@@ -27,5 +27,7 @@ import os, glob
 from pymol import cmd
 base_dir = cmd.exp_path("~/Coding/mdtools/pymol_scripts")
 for path in glob.glob(os.path.join(base_dir, "*.py")):
+    if 'perp_maker' in path:
+        continue
     cmd.do("run " + path.replace("\\", "/"))
 python end

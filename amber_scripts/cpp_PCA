@@ -1,0 +1,65 @@
+module load amber/20_ompigw
+export OMP_NUM_THREADS=1
+ulimit -s unlimited
+
+mpirun -np 6 cpptraj.MPI <<EOF
+# CREATE AVG STRUCTURE
+   parm com_gas.parm7
+   trajin prod_FULL.mdcrd 12500 15000
+   autoimage
+   rms first mass @C,CA,N
+   average pca-avg_in.rst7
+   average pca-avg_in.pdb
+   run
+EOF
+
+echo "Minimising..."
+
+cat > min_avg <<EOF
+   # Full minimization
+   &cntrl
+   imin = 1,      ntb    = 0,       cut   = 10,
+   ncyc = 500,    maxcyc = 500,
+   ntpr = 100,    ntwr   = 100,
+   &end
+EOF
+
+mpirun -np 6 sander.MPI -O -i min_avg -o pca-avg.out -r pca-avg.rst7 -c pca-avg_in.rst7 -ref pca-avg_in.rst7 -p com_gas.parm7
+ambpdb -p com_gas.parm7 -c pca-avg.rst7 > pca-avg.pdb
+rm min_avg mdinfo pca-avg_in*
+
+mpirun -np 6 cpptraj.MPI <<EOF
+   parm com_gas.parm7
+   reference pca-avg.rst7 :10-590@CA [pca-avg]
+   trajin prod_FULL.mdcrd 1 last 10
+   strip !(:10-590)
+   createcrd pca-traj
+   run
+
+   crdaction pca-traj rms ref [pca-avg] @CA
+   crdaction pca-traj matrix covar name pca-covar @CA
+   runanalysis diagmatrix pca-covar out pca-evecs.dat vecs 3 name myEvecs
+EOF
+
+mpirun -np 1 cpptraj.MPI <<EOF
+   parm com_gas.parm7
+   reference pca-avg.rst7 :10-590@CA [pca-avg]
+   trajin prod_FULL.mdcrd 1 last 10
+   strip !(:10-590)
+   createcrd pca-traj
+   run
+
+   crdaction pca-traj rms ref [pca-avg] @CA
+   readdata pca-evecs.dat name Evecs
+   crdaction pca-traj projection CPT modes Evecs beg 1 end 3 @CA crdframes 1,last 
+
+   hist CPT:1 bins 100 out pca-hist1.dat norm name CPT-1
+   hist CPT:2 bins 100 out pca-hist2.dat norm name CPT-2
+   hist CPT:3 bins 100 out pca-hist3.dat norm name CPT-3
+   run
+
+   runanalysis modes name Evecs trajout pca-mode-1.pdb pcmin -25 pcmax 25 tmode 1 trajoutmask :10-590@CA
+   runanalysis modes name Evecs trajout pca-mode-2.pdb pcmin -25 pcmax 25 tmode 2 trajoutmask :10-590@CA
+   runanalysis modes name Evecs trajout pca-mode-3.pdb pcmin -25 pcmax 25 tmode 3 trajoutmask :10-590@CA
+EOF
+

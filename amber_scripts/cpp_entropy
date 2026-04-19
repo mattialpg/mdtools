@@ -1,0 +1,53 @@
+module load amber/20_ompigw
+export OMP_NUM_THREADS=1
+ulimit -s unlimited
+
+L=1050
+M=$(( L*10 ))
+
+mpirun -np 6 cpptraj.MPI <<EOF
+# CREATE TRAJ AND AVG STRUCTURE
+   parm com_gas.parm7
+   set num=$L
+   set frame=$M
+   trajin prod_FULL.mdcrd 10000 \$frame 10
+   autoimage
+   strip !(:10-590)
+   strip @H=
+   rms first mass @C,CA,N
+   average avg-\$num.pdb
+   trajout traj-\$num.nc netcdf
+   run
+EOF
+
+cat > mwcovar.in <<EOF
+   parm com_gas.parm7
+   parmstrip !(:10-590)
+   parmstrip @H=
+   trajin traj-\$num.nc
+   reference avg-\$num.pdb
+   rms reference
+   matrix mwcovar name mwcovar.covar out mwcovar-\$num.out
+   diagmatrix mwcovar.covar thermo outthermo analysis-\$num.out
+   trajout traj-\$num.x crd
+   run
+EOF
+
+sed -i "s|\$num|$L|g" mwcovar.in 
+cpptraj -i mwcovar.in >& mwcovar-$L.log &
+
+#cat > cpptraj.sh <<EOF
+#   !/bin/sh
+#   SBATCH --error=slurm-%j.err
+#   SBATCH --ntasks=1
+#   SBATCH --cpus-per-task=1
+#   SBATCH --gres=gpu:1
+#   SBATCH --time=02:00:00
+#
+#   module load amber/20_ompigw
+#
+#   srun cpptraj.MPI mxcovar.in > mxcovar-num.log
+#EOF
+
+#sed -i "s|num|$L|g" cpptraj.sh
+#sbatch cpptraj.sh 

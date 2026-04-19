@@ -1,0 +1,27 @@
+module load amber/20_ompigw
+export OMP_NUM_THREADS=1
+ulimit -s unlimited
+
+mpirun -np 6 cpptraj.MPI <<EOF
+# CREATE AVG STRUCTURE
+   parm com_gas.parm7
+   trajin prod_FULL.mdcrd 14000 15000
+   average avg_in.rst7
+   average avg_in.pdb
+   run
+EOF
+
+echo "Minimising..."
+
+cat > min_avg <<EOF
+   # Full minimization  
+   &cntrl
+   imin = 1,      ntb    = 0,       cut   = 10,    
+   ncyc = 500,    maxcyc = 500,
+   ntpr = 100,    ntwr   = 100,
+   &end
+EOF
+
+mpirun -np 6 sander.MPI -O -i min_avg -o avg-last100.out -r avg-last100.rst7 -c avg_in.rst7 -ref avg_in.rst7 -p com_gas.parm7
+ambpdb -p com_gas.parm7 -c avg-last100.rst7 > avg-last100.pdb
+rm avg_in* min_avg mdinfo

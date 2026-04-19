@@ -1,0 +1,21 @@
+import pytraj as pt
+import numpy as np
+import glob
+
+flist = glob.glob("../prod*mdcrd")
+print(flist)
+exit(0)
+
+traj = pt.load("../tests/data/Tc5b.x", "../tests/data/Tc5b.top")
+
+
+
+# CREATE FULL TRAJ
+#  parm ../*_solv.parm7
+#  trajin ../prod*mdcrd 1 last 10
+#  autoimage
+#  rms first mass @C,CA,N
+#  strip :WAT,Na+,Cl-
+#  trajout prod_FULL.mdcrd
+#  run
+#EOF

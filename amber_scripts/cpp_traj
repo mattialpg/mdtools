@@ -1,0 +1,33 @@
+module load amber/20_ompigw
+export OMP_NUM_THREADS=1
+ulimit -s unlimited
+
+mpirun -np 6 cpptraj.MPI <<EOF
+# CREATE RMSD STRIPPED TOPOLOGY
+  parm ../*_solv.parm7
+  parmstrip :WAT,Na+,Cl-
+  parmbox nobox
+  parmwrite out com_gas.parm7
+  run
+  clear all
+
+# CREATE FULL TRAJ
+  parm ../*_solv.parm7
+  trajin ../prod*mdcrd 1 last 10
+  check :1-2 skipbadframes silent
+  autoimage
+#  strip !(:8-611)
+#  strip !(:3-606)
+  strip :WAT,Na+,Cl-
+  rms first mass @C,N,CA
+  trajout prod_FULL.mdcrd nobox
+  run
+EOF
+
+cpptraj <<EOF
+# CREATE FULL TRAJ PDB
+  parm com_gas.parm7
+  trajin prod_FULL.mdcrd 1 last 10
+  trajout prod_FULL.pdb
+  run
+EOF

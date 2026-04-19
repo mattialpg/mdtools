@@ -1,0 +1,9 @@
+# NOTE: force field dependent, here FF19SB
+
+source leaprc.protein.ff19SB
+source leaprc.gaff2
+MOL = loadmol2 substrate.mol2
+
+saveoff MOL MOL.lib
+
+quit
