@@ -7,13 +7,15 @@ import argparse
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import mdtraj as md
+# import mdtraj as md
+import MDAnalysis as mda
 
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 
-import tools.utils as utils, visualisation.palettes as palettes
+import tools.utils as utils
+import visualisation.palettes as palettes
 
 sys.path.append('/home/mattia/aiddtools')
 import interaction_tools as inttools
@@ -22,6 +24,7 @@ import interaction_tools as inttools
 class OccupancyAnalysis:
     def __init__(self, trj_name, configs):
         self.configs = configs
+        self.trj_name = trj_name
         self.workdir = Path(self.configs['workdir'])
         self.frame_dir = self.workdir / 'complex.frames'
         self.int_types = ['hydrophobic', 'hbond', 'waterbridge',
@@ -33,19 +36,29 @@ class OccupancyAnalysis:
             input("Press Enter to continue...\n")
 
         print("Loading trajectory...")
-        self.traj = md.load_xtc(f'{trj_name}.xtc', top=f'{trj_name}.gro')
+        self.u = mda.Universe(f"{self.trj_name}.gro", f"{self.trj_name}.xtc")
+
 
     def extract_frames(self):
-        total_frames = self.traj.n_frames
-        max_frames = 1001
-        frame_indices = np.linspace(0, total_frames - 1, max_frames, dtype=int)\
-            if total_frames >= max_frames else np.arange(total_frames)
-        for i, idx in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit='frame')):
-            self.traj[idx].save_pdb(f'{self.frame_dir}/frame_{i+1:04d}.pdb')
+        non_water = self.u.select_atoms("not water and not resname K and not resname CL")
 
-        # subprocess.run(['gmx', 'trjconv', '-f', f'{self.trj_name}.xtc',
-        #     '-s', f'{self.trj_name}.gro', '-o', f'{self.int_dir}/frame_.pdb',
-        #     '-sep', '-nzero', '4'], input="System\n", text=True, check=True)
+        # Build ligand selection from config
+        lig_resnames = [d.get("md_id", d.get("resname", "LIG")) for d in self.configs.get("ligands", [])]
+        lig_sel = " or ".join([f"resname {r}" for r in lig_resnames])
+
+        # Select water shell
+        water = self.u.select_atoms("resname SOL or resname HOH or resname WAT")
+        cutoff_A = float(self.configs.get("hydration_shell_cutoff_A", 5))
+        shell = water.select_atoms(f"byres around {cutoff_A} global ({lig_sel})",
+            updating=True) if lig_sel else self.u.atoms[[]]
+
+        total_frames = min(len(self.u.trajectory), 1001)
+        frame_indices = np.linspace(0, len(self.u.trajectory) - 1, total_frames, dtype=int)
+        for i, fi in enumerate(tqdm(frame_indices, desc="Exporting MD frames", unit="frame")):
+            self.u.trajectory[fi]
+            export_ag = (non_water + shell).unique
+            export_ag.write(f"{self.frame_dir}/frame_{i+1:04d}.pdb")
+
 
     def pivot_df(self, df_lig):
         # Preserve frame order from the source table
@@ -53,13 +66,21 @@ class OccupancyAnalysis:
         all_pdb = pd.Index(pd.unique(df_lig['PDB']), name='PDB')
         df_lig['RESID'] = df_lig['RESID'].replace({'NA': np.nan, 'NANA': np.nan})
         df_lig['INT_TYPE'] = df_lig['INT_TYPE'].where(
-            df_lig['INT_TYPE'].isin(int_priority), np.nan)
+            df_lig['INT_TYPE'].isin(self.int_types), np.nan)
+
+        # # Flag cells with more than one interaction type in the same frame/residue.
+        # valid_rows = df_lig['INT_TYPE'].notna()
+        # if valid_rows.any():
+        #     ntypes = df_lig.loc[valid_rows].groupby(['PDB', 'RESID'])['INT_TYPE'].transform('nunique')
+        #     multi_idx = ntypes[ntypes > 1].index
+        #     df_lig.loc[multi_idx, 'INT_TYPE'] = 'multiple'
+
         df_lig['INT_PRIORITY'] = df_lig['INT_TYPE'].map(int_priority)
         df_lig = df_lig.sort_values('INT_PRIORITY')
 
         # Keep one row per frame even when there is no valid interaction
-        df_pivot = df_lig.pivot_table(
-            index='PDB', columns='RESID', values='INT_TYPE', aggfunc='first')
+        df_pivot = df_lig.pivot_table(index='PDB', columns='RESID',
+            values='INT_TYPE', aggfunc='first')
         df_pivot = df_pivot.reindex(all_pdb)
         df_pivot = df_pivot.replace(int_priority)
 
@@ -75,7 +96,8 @@ class OccupancyAnalysis:
             df_pivot = df_pivot[ordered]
 
             # Keep 12 most populated residues
-            top_populated = df_pivot.notna().sum().sort_values(ascending=False).head(12).index
+            top_populated = df_pivot.notna().sum().sort_values(
+                ascending=False).head(12).index
             df_pivot = df_pivot[top_populated]
         
         return df_pivot
@@ -93,8 +115,8 @@ class OccupancyAnalysis:
         dcolorsc = [[0.0, '#C9D0D6'], [left, '#C9D0D6']] + dcolorsc
 
         # Build time vector scaled to number of displayed frames
-        total_time_ns = self.traj.time[-1] / 1000
         n_frames = len(df_pivot.index)
+        total_time_ns = self.u.trajectory[-1].time / 1000
         time_ns = np.linspace(0, total_time_ns, n_frames)
         dt = time_ns[1] - time_ns[0] if len(time_ns) > 1 else 1.0
         x_range = [time_ns[0] - dt/2, time_ns[-1] + dt/2]
@@ -128,6 +150,7 @@ class OccupancyAnalysis:
             'layout': dict(
                 height=500, width=1100,
                 margin=dict(l=100, r=50, t=65, b=0),
+                font=dict(color=palettes.blacks[0]),
                 title=dict(
                     text=f"Interaction occupancy ({self.pdb_id}-{self.ligand_resname})",
                     x=0.5, y=0.95, xanchor='center', yanchor='top',
@@ -167,26 +190,26 @@ class OccupancyAnalysis:
         return series_df.iloc[indices]
 
 
-    def _make_line_trace(self, series_df, y_col, color, name, hovertemplate):
+    def _make_line_trace(self, series_df, y_col, color, width, name, hovertemplate):
         return go.Scatter(
             x=series_df['time_ns'],
             y=series_df[y_col],
             mode='lines',
-            line=dict(color=color, width=1.1),
+            line=dict(color=color, width=width),
             name=name,
             hovertemplate=hovertemplate)
 
 
     def make_rmsd_trace(self):
         rmsd_df = self._read_xvg_series('trj_rmsd_lig.xvg', 'rmsd_nm')
-        trace = self._make_line_trace(
-            rmsd_df, 'rmsd_nm', '#1A2228', 'RMSD (nm)',
-            'RMSD=%{y:.3f} nm<extra></extra>')
+        trace = self._make_line_trace(rmsd_df, 'rmsd_nm', palettes.blacks[0],
+            1.3, 'RMSD (nm)', 'RMSD=%{y:.3f} nm<extra></extra>')
 
         trace.meta = {
             'layout': dict(
                 height=250, width=1040,
                 margin=dict(l=100, r=50, t=10, b=65),
+                font=dict(color=palettes.blacks[0]),
                 xaxis_title='<b>Time (ns)</b>',
                 plot_bgcolor='#FFFFFF',
                 showlegend=False,
@@ -197,9 +220,16 @@ class OccupancyAnalysis:
                     bordercolor='#FFFFFF')),
             'xaxis_params': dict(
                 showgrid=False,
+                showline=True,
+                linewidth=2,
+                linecolor=palettes.blacks[0],
+                ticks='outside',
+                ticklen=4,
+                tickwidth=1,
+                tickcolor=palettes.blacks[0],
                 unifiedhovertitle=dict(text='Time=%{x:.2f} ns')),
             'yaxis_params': dict(
-                title=dict(text='<b>RMSD (nm)</b>', font=dict(size=12)),
+                title=dict(text='<b>RMSD (nm)</b>'),
                 gridcolor='lightgrey', showgrid=True,
                 zeroline=True, zerolinecolor='lightgrey',
                 showticklabels=True)}
@@ -208,16 +238,14 @@ class OccupancyAnalysis:
 
     def make_distance_trace(self):
         dist_df = self._read_xvg_series('trj_dist_lig.xvg', 'dist_nm')
-        trace = self._make_line_trace(
-            dist_df, 'dist_nm', '#B03060', 'Distance (nm)',
-            'Distance=%{y:.3f} nm<extra></extra>')
+        trace = self._make_line_trace(dist_df, 'dist_nm', '#B03060',
+            1.1, 'Distance (nm)', 'Distance=%{y:.3f} nm<extra></extra>')
         
         trace.meta = {
             'axis_id': 'y2',
             'yaxis_params': dict(
                 title=dict(text='<b>Distance (nm)</b>',
-                    font=dict(color='#B03060', size=12)),
-                # tickvals=tickvals, ticktext=ticktext, range=[0, upper],
+                    font=dict(color='#B03060')),
                 tickfont=dict(color='#B03060'),
                 showgrid=False, showline=True, zeroline=False,
                 showticklabels=True),}
@@ -354,7 +382,10 @@ if __name__ == '__main__':
         int_dir = workdir / f'{lig_name}.interactions'
         int_dir.mkdir(parents=True, exist_ok=True)
 
-        df_lig = df_int[df_int['RESNAME'] == lig_resname].reset_index(drop=True)
+        df_lig = df_int[df_int['RESNAME'] == lig_resname].copy()
+        aa_keys = set(utils.standard_AAs.keys())
+        resid_name = df_lig['RESID'].astype(str).str.extract(R'^([A-Za-z]+)', expand=False)
+        df_lig = df_lig[resid_name.isin(aa_keys)].reset_index(drop=True)
         if df_lig.empty:
             continue
         df_lig.to_csv(int_dir / 'interactions.csv', index=False)

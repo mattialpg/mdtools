@@ -11,6 +11,9 @@ TOOL_PATHS = {
     "obabel": "/home/mattia/.miniforge/envs/my-chem/bin/obabel",
     "vina": "/home/mattia/.bin/smina.static",}
 
+standard_AAs = {'VAL':'V', 'ILE':'I', 'LEU':'L', 'GLU':'E', 'GLN':'Q', 'ASP':'D', 'ASN':'N',
+                'HIS':'H', 'TRP':'W', 'PHE':'F', 'TYR':'Y', 'ARG':'R', 'LYS':'K', 'SER':'S',
+                'THR':'T', 'MET':'M', 'ALA':'A',  'GLY':'G', 'PRO':'P', 'CYS':'C'}
 
 def setup_logger(name=None, level=logging.INFO):
     """Create a controlled logger with consistent handlers."""

@@ -29,6 +29,7 @@ TRJNAME="trj_${MD_LENGTH}"
 # Use temporary storage for intermediate trajectory files
 WORK_TMPDIR="${TMPDIR:-/tmp}"
 RUN_TMPDIR="$(mktemp -d "${WORK_TMPDIR%/}/make_trj.XXXXXX")"
+SAMPLED_XTC="${TRJNAME}_sampled.xtc"
 WHOLE_XTC="${TRJNAME}_whole.xtc"
 NOJUMP_XTC="${TRJNAME}_nojump.xtc"
 NOROT_XTC="${TRJNAME}_norot.xtc"
@@ -49,9 +50,14 @@ echo "non-Water_&_!K_&_!CL" | gmx convert-tpr -s "${MDNAME}.tpr" \
   -o "${TRJNAME}_strip.tpr" -n index.ndx
 echo -e "q" | gmx make_ndx -f "${TRJNAME}_strip.gro" -o strip.ndx
 
+# Downsample full system
+printf "System\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" \
+  -o "${SAMPLED_XTC}" -dt "${MD_LENGTH}" -novel -ndec 2
+cp wrapped.gro "${TRJNAME}_sampled.gro"
+
 # Extract fitted trajectory
-printf "non-Water_&_!K_&_!CL\n" | gmx trjconv -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" \
-  -o "${WHOLE_XTC}" -n index.ndx -pbc whole -dt "${MD_LENGTH}" -novel -ndec 2
+printf "non-Water_&_!K_&_!CL\n" | gmx trjconv -f "${SAMPLED_XTC}" -s "${MDNAME}.tpr" \
+  -o "${WHOLE_XTC}" -n index.ndx -pbc whole -novel -ndec 2
 printf "System\nSystem\n" | gmx trjconv -f "${WHOLE_XTC}" -s "${TRJNAME}_strip.tpr" \
   -o "${NOJUMP_XTC}" -n strip.ndx -pbc nojump -center -ndec 2
 printf "System\nSystem\nSystem\n" | gmx trjconv -f "${NOJUMP_XTC}" -s "${TRJNAME}_strip.tpr" \
