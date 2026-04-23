@@ -41,7 +41,8 @@ if [[ ! -s "${MDNAME}.gro" ]]; then
 fi
 
 # Prepare stripped files
-echo -e "q" | gmx make_ndx -f wrapped.gro -o index.ndx
+# echo -e "q" | gmx make_ndx -f wrapped.gro -o index.ndx
+echo -e "r K\nr CL\nq" | gmx make_ndx -f wrapped.gro -o index.ndx
 echo -e '"non-Water" & ! "K" & ! "CL"\nq' | gmx make_ndx -f wrapped.gro \
   -o index.ndx -n index.ndx
 echo 'non-Water_&_!K_&_!CL' | gmx trjconv -f wrapped.gro -s "${MDNAME}.tpr" \
