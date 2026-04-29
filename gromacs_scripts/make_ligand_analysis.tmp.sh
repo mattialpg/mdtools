@@ -40,35 +40,41 @@ log() {
 
 # python ~/mdtools/interaction_analysis.py --trj_name "${TRJNAME}_strip"
 
-### ---------------------------- ###
-###       Binding Affinity       ###
-### ---------------------------- ###
-
+#
 MMPBSA_DIR="ligand.mmpbsa"
 mkdir -p "${MMPBSA_DIR}"
-echo -e "q" | gmx make_ndx -f "${TRJNAME}_strip.gro" -o "${MMPBSA_DIR}/mmpbsa.ndx"
-gmx select -s "${TRJNAME}_strip.gro" -n "${MMPBSA_DIR}/mmpbsa.ndx" \
+echo -e "q" | gmx make_ndx -f "${TRJNAME}_strip.gro" -o "${MMPBSA_DIR}/index_mmpbsa.ndx"
+gmx select -s "${TRJNAME}_strip.gro" -n "${MMPBSA_DIR}/index_mmpbsa.ndx" \
   -on "${MMPBSA_DIR}/complex.ndx" -select "group \"Protein\" or group \"${LIG}\""
 sed -i '0,/^\[.*\]$/s//[ Protein_LIG ]/' "${MMPBSA_DIR}/complex.ndx"
-printf "Protein_LIG\n" | gmx trjconv -f "${TRJNAME}_strip.gro" -s "${TRJNAME}_strip.gro" \
-  -o "${MMPBSA_DIR}/${TRJNAME}_strip.pdb" -n "${MMPBSA_DIR}/complex.ndx" 
 
-# Assign chain to receptor (A) and ligand (B)
-awk 'BEGIN{OFS=""}(/^ATOM/ || /^HETATM/){
-  resn = substr($0,18,3) chain = (resn == "LIG" ? "B" : "A")
-  $0 = sprintf("%s%s%s", substr($0,1,21), chain, substr($0,23))}{print}
-' "${MMPBSA_DIR}/${TRJNAME}_strip.pdb" > "${MMPBSA_DIR}/strip.tmp"
-mv "${MMPBSA_DIR}/strip.tmp" "${MMPBSA_DIR}/${TRJNAME}_strip.pdb"
+# Build a Protein+LIG-only complex PDB for gmx_MMPBSA and annotate chains.
+printf "Protein_${LIG}\n" | gmx trjconv -f "${TRJNAME}_strip.gro" -s "${TRJNAME}_strip.gro" \
+  -n "${MMPBSA_DIR}/complex.ndx" -o "${MMPBSA_DIR}/complex_prot_lig.pdb"
 
-# Create MMPBSA input
-( cd "${MMPBSA_DIR}" && gmx_MMPBSA --create_input gb >/dev/null )
-sed -i 's/\(forcefields *= *\)\".*\"/\1\"oldff\/leaprc.ff99SBildn,leaprc.gaff\"/' "${MMPBSA_DIR}/mmpbsa.in"
-sed -i 's/\(saltcon *= *\)0\.0/\10.150/' "${MMPBSA_DIR}/mmpbsa.in"
+# Chain A: receptor atoms, Chain B: ligand atoms (resname LIG).
+awk '
+BEGIN{OFS=""}
+(/^ATOM/ || /^HETATM/){
+  resn = substr($0,18,3)
+  chain = (resn == "LIG" ? "B" : "A")
+  $0 = sprintf("%s%s%s", substr($0,1,21), chain, substr($0,23))
+}
+{print}
+' "${MMPBSA_DIR}/complex_prot_lig.pdb" > "${MMPBSA_DIR}/complex_prot_lig_chain.pdb"
 
-# Run MMPBSA
+cat > "${MMPBSA_DIR}/mmpbsa.in" << EOF
+&general
+  startframe=1, endframe=999999, interval=10,
+  verbose=1, keep_files=0,
+/
+&gb
+  igb=5, saltcon=0.150
+/
+EOF
+
 gmx_MMPBSA -O -nogui -i "${MMPBSA_DIR}/mmpbsa.in" -cs "${MDNAME}.tpr" \
-  -cr "${MMPBSA_DIR}/${TRJNAME}_strip.pdb" \
-  -ct "${TRJNAME}_strip.xtc" -ci "${MMPBSA_DIR}/mmpbsa.ndx" -cg Protein "${LIG}" \
+  -cr "${MMPBSA_DIR}/complex_prot_lig_chain.pdb" \
+  -ct "${TRJNAME}_strip.xtc" -ci "${MMPBSA_DIR}/index_mmpbsa.ndx" -cg Protein "${LIG}" \
   -cp topol.top -o "${MMPBSA_DIR}/FINAL_RESULTS_MMPBSA.dat" \
   -eo "${MMPBSA_DIR}/FINAL_RESULTS_MMPBSA.csv"
-mv COMPACT_MMXSA_RESULTS.mmxsa gmx_MMPBSA.log "${MMPBSA_DIR}"

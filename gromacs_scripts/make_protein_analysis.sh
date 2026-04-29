@@ -24,16 +24,13 @@ log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
 
-
 MD_LENGTH=$(yq -r '.md_length // empty' "${CONFIG_YAML}")
 MDNAME="md_${MD_LENGTH}"
 TRJNAME="trj_${MD_LENGTH}"
-
 STRIP_XTC="${TRJNAME}_strip.xtc"
 STRIP_GRO="${TRJNAME}_strip.gro"
 NOLIG_XTC="${TRJNAME}_nolig.xtc"
 NOLIG_GRO="${TRJNAME}_nolig.gro"
-
 
 printf "q\n" | gmx make_ndx -f "${STRIP_GRO}" -o strip.ndx
 printf "C-alpha\n" | gmx trjconv -f "${STRIP_GRO}" -s "${STRIP_GRO}" \
