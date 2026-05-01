@@ -21,6 +21,8 @@ sys.path.append('/home/mattia/aiddtools')
 import interaction_tools as inttools
 
 
+TEXT_COLOR = palettes.blacks[0]
+
 class OccupancyAnalysis:
     def __init__(self, trj_name, configs):
         self.configs = configs
@@ -38,6 +40,42 @@ class OccupancyAnalysis:
         print("Loading trajectory...")
         self.u = mda.Universe(f"{self.trj_name}.gro", f"{self.trj_name}.xtc")
 
+
+    def _read_xvg_series(self, xvg_path, y_col):
+        xvg_path = Path(xvg_path)
+        rows = []
+        with xvg_path.open() as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(('@', '#')):
+                    continue
+                fields = stripped.split()
+                if len(fields) < 2:
+                    continue
+                try:
+                    rows.append((float(fields[0]), float(fields[1])))
+                except ValueError:
+                    continue
+
+        series_df = pd.DataFrame(rows, columns=['time_ns', y_col])
+        if series_df.empty:
+            raise ValueError(f'No data found in {xvg_path}')
+
+        max_frames = 1001
+        indices = np.linspace(0, len(series_df) - 1, max_frames, dtype=int) \
+            if len(series_df) >= max_frames else np.arange(len(series_df))
+        return series_df.iloc[indices]
+
+
+    def _make_line_trace(self, series_df, y_col, color, width, name, hovertemplate):
+        return go.Scatter(
+            x=series_df['time_ns'],
+            y=series_df[y_col],
+            mode='lines',
+            line=dict(color=color, width=width),
+            name=name,
+            hovertemplate=hovertemplate)
+    
 
     def extract_frames(self):
         non_water = self.u.select_atoms("not water and not resname K and not resname CL")
@@ -107,12 +145,8 @@ class OccupancyAnalysis:
         dcolorsc, colorbar_cfg = palettes.discrete_colorscale(
             'geodataviz_diverging_1', self.int_types)
         colorbar_cfg = dict(colorbar_cfg, x=1.0, y=0.5,
-            xanchor='left', yanchor='middle', len=1.048)
-        
-        # Render missing values as grey
-        left = abs(-0.01) / (len(self.int_types) + abs(-0.01))
-        dcolorsc = [[left + x * (1.0 - left), c] for x, c in dcolorsc]
-        dcolorsc = [[0.0, '#C9D0D6'], [left, '#C9D0D6']] + dcolorsc
+            xanchor='left', yanchor='middle', len=1.048,
+            ticks='outside', tickcolor='rgba(0,0,0,0)')
 
         # Build time vector scaled to number of displayed frames
         n_frames = len(df_pivot.index)
@@ -133,7 +167,7 @@ class OccupancyAnalysis:
         if valid.any():
             int_labels = np.array(self.int_types, dtype=object)
             customdata[valid] = int_labels[z_vals[valid].astype(int)]
-        z_vals = np.where(valid, z_vals + 1e-6, -0.01)
+        z_vals = np.where(valid, z_vals + 1e-6, np.nan)
 
         trace = go.Heatmap(
             x=time_ns, 
@@ -150,89 +184,42 @@ class OccupancyAnalysis:
             'layout': dict(
                 height=500, width=1100,
                 margin=dict(l=100, r=50, t=65, b=0),
-                font=dict(color=palettes.blacks[0]),
+                font=dict(color=TEXT_COLOR),
                 title=dict(
                     text=f"Interaction occupancy ({self.pdb_id}-{self.ligand_resname})",
                     x=0.5, y=0.95, xanchor='center', yanchor='top',
                     font=dict(size=20, weight='bold')),
                 plot_bgcolor='#C9D0D6',
+                paper_bgcolor='rgba(0,0,0,0)',
                 hovermode='closest'),
             'xaxis_params': dict(showgrid=False, showticklabels=False, range=x_range),
-            'yaxis_params': dict(
-                title_text='<b>Residue</b>', tickmode='linear',
-                showgrid=False),}
+            'yaxis_params': dict(title_text='<b>Residue</b>', tickmode='linear',
+                showgrid=False, ticklabelstandoff=4),}
         return trace
 
 
-    def _read_xvg_series(self, xvg_path, y_col):
-        xvg_path = Path(xvg_path)
-        rows = []
-        with xvg_path.open() as handle:
-            for line in handle:
-                stripped = line.strip()
-                if not stripped or stripped.startswith(('@', '#')):
-                    continue
-                fields = stripped.split()
-                if len(fields) < 2:
-                    continue
-                try:
-                    rows.append((float(fields[0]), float(fields[1])))
-                except ValueError:
-                    continue
-
-        series_df = pd.DataFrame(rows, columns=['time_ns', y_col])
-        if series_df.empty:
-            raise ValueError(f'No data found in {xvg_path}')
-
-        max_frames = 1001
-        indices = np.linspace(0, len(series_df) - 1, max_frames, dtype=int) \
-            if len(series_df) >= max_frames else np.arange(len(series_df))
-        return series_df.iloc[indices]
-
-
-    def _make_line_trace(self, series_df, y_col, color, width, name, hovertemplate):
-        return go.Scatter(
-            x=series_df['time_ns'],
-            y=series_df[y_col],
-            mode='lines',
-            line=dict(color=color, width=width),
-            name=name,
-            hovertemplate=hovertemplate)
-
-
     def make_rmsd_trace(self):
-        rmsd_df = self._read_xvg_series('trj_rmsd_lig.xvg', 'rmsd_nm')
-        trace = self._make_line_trace(rmsd_df, 'rmsd_nm', palettes.blacks[0],
+        df_rmsd = self._read_xvg_series('trj_rmsd_lig.xvg', 'rmsd_nm')
+        df_rmsd["time_ns"] = df_rmsd["time_ns"].round(2)
+        trace = self._make_line_trace(df_rmsd, 'rmsd_nm', TEXT_COLOR,
             1.3, 'RMSD (nm)', 'RMSD=%{y:.3f} nm<extra></extra>')
 
         trace.meta = {
             'layout': dict(
-                height=250, width=1040,
-                margin=dict(l=100, r=50, t=10, b=65),
-                font=dict(color=palettes.blacks[0]),
+                height=250, width=1100,
+                margin=dict(l=100, r=127, t=10, b=65),
+                font=dict(color=TEXT_COLOR),
                 xaxis_title='<b>Time (ns)</b>',
-                plot_bgcolor='#FFFFFF',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
                 showlegend=False,
                 hovermode='x unified',
                 hoverlabel=dict(
                     bgcolor='#444444',
                     font=dict(color='#FFFFFF', size=13),
                     bordercolor='#FFFFFF')),
-            'xaxis_params': dict(
-                showgrid=False,
-                showline=True,
-                linewidth=2,
-                linecolor=palettes.blacks[0],
-                ticks='outside',
-                ticklen=4,
-                tickwidth=1,
-                tickcolor=palettes.blacks[0],
-                unifiedhovertitle=dict(text='Time=%{x:.2f} ns')),
-            'yaxis_params': dict(
-                title=dict(text='<b>RMSD (nm)</b>'),
-                gridcolor='lightgrey', showgrid=True,
-                zeroline=True, zerolinecolor='lightgrey',
-                showticklabels=True)}
+            'yaxis_params': dict(title=dict(text='<b>RMSD (nm)</b>'),
+                showticklabels=True, ticklabelstandoff=4)}
         return trace
 
 
@@ -246,9 +233,9 @@ class OccupancyAnalysis:
             'yaxis_params': dict(
                 title=dict(text='<b>Distance (nm)</b>',
                     font=dict(color='#B03060')),
+                showticklabels=True, ticklabelstandoff=4,
                 tickfont=dict(color='#B03060'),
-                showgrid=False, showline=True, zeroline=False,
-                showticklabels=True),}
+                ),}
         return trace
 
 
@@ -257,12 +244,14 @@ class OccupancyAnalysis:
         fig1.update_layout(**occupancy_trace.meta['layout'])
         fig1.update_xaxes(**occupancy_trace.meta['xaxis_params'])
         fig1.update_yaxes(**occupancy_trace.meta['yaxis_params'])
+        fig1.update_xaxes(showline=False, zeroline=False,
+            showgrid=False, mirror=False)
 
         fig2 = go.Figure()
         fig2.add_trace(rmsd_trace)
         fig2.add_trace(distance_trace)
-        fig2.update_layout(**rmsd_trace.meta['layout'])
-        fig2.update_xaxes(**rmsd_trace.meta['xaxis_params'])
+        fig2.data[0].update(xaxis='x', yaxis='y')
+        fig2.data[1].update(xaxis='x', yaxis='y2')
 
         # Compute tickvals and ranges
         rmsd_upper, rmsd_tickvals, dist_upper, dist_tickvals = utils.nice_ticks(
@@ -270,75 +259,120 @@ class OccupancyAnalysis:
         rmsd_upper += rmsd_upper * 0.1
         dist_upper += dist_upper * 0.1
 
+        fig2.update_layout(**rmsd_trace.meta['layout'])
         fig2.update_layout(
             yaxis=dict(**rmsd_trace.meta['yaxis_params'],
                 tickmode='array', tickvals=rmsd_tickvals,
+                showline=False, zeroline=False,
+                showgrid=True, gridcolor='lightgrey', 
                 range=[0, rmsd_upper]),
+            hovermode=False,
             yaxis2=dict(**distance_trace.meta['yaxis_params'],
                 tickmode='array', tickvals=dist_tickvals,
+                showline=False, showgrid=False, zeroline=False,
                 range=[0, dist_upper], overlaying='y',
                 side='right'))
+        fig2.update_xaxes(
+            showline=True, linewidth=2, linecolor=TEXT_COLOR,
+            ticks="outside",
+            ticklen=6, tickwidth=1, tickcolor=TEXT_COLOR,
+            showgrid=False, zeroline=False,
+            range=[float(np.nanmin(rmsd_trace.x)),
+                float(np.nanmax(rmsd_trace.x))],
+            unifiedhovertitle=dict(text="Time=%{x:.2f} ns"))
 
-        # Attach distance trace to right axis
-        fig2.data[1].update(yaxis=distance_trace.meta['axis_id'])
+        return fig1, fig2
 
-        html = (pio.to_html(fig1, include_plotlyjs='cdn', full_html=False, div_id='occ') +
-            pio.to_html(fig2, include_plotlyjs=False, full_html=False, div_id='lines'))
 
-        # Generate PNG layout
-        png_fig = make_subplots(
-            rows=2, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.04,
-            row_heights=[0.67, 0.33],
-            specs=[[{}], [{'secondary_y': True}]])
-        png_fig.add_trace(go.Heatmap(occupancy_trace.to_plotly_json()), row=1, col=1)
-        png_fig.add_trace(go.Scatter(rmsd_trace.to_plotly_json()), row=2, col=1, secondary_y=False)
-        png_fig.add_trace(go.Scatter(distance_trace.to_plotly_json()), row=2, col=1, secondary_y=True)
+    def make_html(self, fig1, fig2):
+        plot_html_1 = pio.to_html(fig1, include_plotlyjs="cdn", full_html=False, div_id="occ")
+        plot_html_2 = pio.to_html(fig2, include_plotlyjs=False, full_html=False, div_id="lines")
 
-        png_fig.update_layout(
-            height=650, width=1100,
-            margin=dict(l=100, r=70, t=65, b=65),
-            title=occupancy_trace.meta['layout']['title'],
-            plot_bgcolor=occupancy_trace.meta['layout']['plot_bgcolor'],
-            paper_bgcolor='#FFFFFF',
-            showlegend=False,
-            hovermode='x unified',
-            hoverlabel=rmsd_trace.meta['layout']['hoverlabel'])
-        png_fig.update_xaxes(row=1, col=1, **occupancy_trace.meta['xaxis_params'])
-        png_fig.update_yaxes(row=1, col=1, **occupancy_trace.meta['yaxis_params'])
-        png_fig.update_xaxes(row=2, col=1,
-            title_text=rmsd_trace.meta['layout']['xaxis_title'],
-            **rmsd_trace.meta['xaxis_params'])
-        png_fig.update_yaxes(row=2, col=1, secondary_y=False,
-            tickmode='array', tickvals=rmsd_tickvals, range=[0, rmsd_upper],
-            **rmsd_trace.meta['yaxis_params'])
-        png_fig.update_yaxes(row=2, col=1, secondary_y=True,
-            tickmode='array', tickvals=dist_tickvals, range=[0, dist_upper],
-            **distance_trace.meta['yaxis_params'])
+        html = f"""
+        <!doctype html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>
+            html,
+            body {{
+            margin: 0;
+            padding: 0;
+            # background: red;
+            }}
 
-        # Restore white background for subplot 2
-        row2_xdomain = png_fig.layout.xaxis2.domain
-        row2_ydomain = png_fig.layout.yaxis2.domain
-        png_fig.add_shape(
-            type='rect',
-            xref='paper', yref='paper',
-            x0=row2_xdomain[0], x1=row2_xdomain[1],
-            y0=row2_ydomain[0], y1=row2_ydomain[1],
-            fillcolor='#FFFFFF',
-            line=dict(width=0),
-            layer='below')
+            .plot-page {{
+            min-height: 100vh;
+            # background: red;
+            }}
+        </style>
+        </head>
+        <body>
+        <div class="plot-page">
+            {plot_html_1}
+            {plot_html_2}
+        </div>
+        </body>
+        </html>
+        """
 
-        # Fit heatmap colorbar to the occupancy subplot
-        occ_domain = png_fig.layout.yaxis.domain
-        occ_center = (occ_domain[0] + occ_domain[1]) / 2
-        occ_height = (occ_domain[1] - occ_domain[0]) * 1.055
-        occ_xmax = png_fig.layout.xaxis.domain[1]
-        png_fig.update_traces(selector=dict(type='heatmap'),
-            colorbar=dict(x=occ_xmax, y=occ_center, len=occ_height,
-            yanchor='middle', thickness=18))
+        return html
 
-        return html, png_fig
+
+        # # Generate PNG layout
+        # png_fig = make_subplots(
+        #     rows=2, cols=1,
+        #     shared_xaxes=True,
+        #     vertical_spacing=0.04,
+        #     row_heights=[0.67, 0.33],
+        #     specs=[[{}], [{'secondary_y': True}]])
+        # png_fig.add_trace(go.Heatmap(occupancy_trace.to_plotly_json()), row=1, col=1)
+        # png_fig.add_trace(go.Scatter(rmsd_trace.to_plotly_json()), row=2, col=1, secondary_y=False)
+        # png_fig.add_trace(go.Scatter(distance_trace.to_plotly_json()), row=2, col=1, secondary_y=True)
+
+        # png_fig.update_layout(
+        #     height=650, width=1100,
+        #     margin=dict(l=100, r=70, t=65, b=65),
+        #     title=occupancy_trace.meta['layout']['title'],
+        #     plot_bgcolor=occupancy_trace.meta['layout']['plot_bgcolor'],
+        #     paper_bgcolor='#FFFFFF',
+        #     showlegend=False,
+        #     hovermode='x unified',
+        #     hoverlabel=rmsd_trace.meta['layout']['hoverlabel'])
+        # png_fig.update_xaxes(row=1, col=1, **occupancy_trace.meta['xaxis_params'])
+        # png_fig.update_yaxes(row=1, col=1, **occupancy_trace.meta['yaxis_params'])
+        # png_fig.update_xaxes(row=2, col=1,
+        #     title_text=rmsd_trace.meta['layout']['xaxis_title'],
+        #     **rmsd_trace.meta['xaxis_params'])
+        # png_fig.update_yaxes(row=2, col=1, secondary_y=False,
+        #     tickmode='array', tickvals=rmsd_tickvals, range=[0, rmsd_upper],
+        #     **rmsd_trace.meta['yaxis_params'])
+        # png_fig.update_yaxes(row=2, col=1, secondary_y=True,
+        #     tickmode='array', tickvals=dist_tickvals, range=[0, dist_upper],
+        #     **distance_trace.meta['yaxis_params'])
+
+        # # Restore white background for subplot 2
+        # row2_xdomain = png_fig.layout.xaxis2.domain
+        # row2_ydomain = png_fig.layout.yaxis2.domain
+        # png_fig.add_shape(
+        #     type='rect',
+        #     xref='paper', yref='paper',
+        #     x0=row2_xdomain[0], x1=row2_xdomain[1],
+        #     y0=row2_ydomain[0], y1=row2_ydomain[1],
+        #     fillcolor='#FFFFFF',
+        #     line=dict(width=0),
+        #     layer='below')
+
+        # # Fit heatmap colorbar to the occupancy subplot
+        # occ_domain = png_fig.layout.yaxis.domain
+        # occ_center = (occ_domain[0] + occ_domain[1]) / 2
+        # occ_height = (occ_domain[1] - occ_domain[0]) * 1.055
+        # occ_xmax = png_fig.layout.xaxis.domain[1]
+        # png_fig.update_traces(selector=dict(type='heatmap'),
+        #     colorbar=dict(x=occ_xmax, y=occ_center, len=occ_height,
+        #     yanchor='middle', thickness=18))
+
+        # return html, png_fig
 
 
     def run_analysis(self):
@@ -360,8 +394,9 @@ class OccupancyAnalysis:
         occupancy_trace = self.make_occupancy_trace(df_pivot)
         rmsd_trace = self.make_rmsd_trace()
         distance_trace = self.make_distance_trace()
-        html, png = self.plot_occupancy(occupancy_trace, rmsd_trace, distance_trace)
-        return html, png
+        fig1, fig2 = self.plot_occupancy(occupancy_trace, rmsd_trace, distance_trace)
+        html = self.make_html(fig1, fig2)
+        return html
 
 
 if __name__ == '__main__':
@@ -393,13 +428,13 @@ if __name__ == '__main__':
 
         occ.pdb_id = configs['receptor_id']
         occ.ligand_resname = lig_resname
-        html, png = occ.plot_analysis(df_pivot)
+        html = occ.plot_analysis(df_pivot)
 
         html_path = workdir / f"trj_occupancy_{lig_resname}.html"
         with html_path.open('w') as f:
             f.write(html)
         print(f"Saved {html_path.name}")
 
-        png_path = workdir / f"trj_occupancy_{lig_resname}.png"
-        png.write_image(png_path, scale=3)
-        print(f"Saved {png_path.name}")
+        # png_path = workdir / f"trj_occupancy_{lig_resname}.png"
+        # png.write_image(png_path, scale=3)
+        # print(f"Saved {png_path.name}")

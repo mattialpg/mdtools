@@ -28,17 +28,17 @@ log() {
   printf "\n\033[38;2;255;255;255;48;2;15;88;157m%s\033[0m\n\n" "$1"
 }
 
-# # Calculate ligand RMSD and pocket-ligand distance
-# echo -e "q" | gmx make_ndx -f "${MDNAME}.gro" -o index.ndx
-# printf "${LIG}\n" | gmx rms -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" \
-#   -n index.ndx -o trj_rmsd_lig.xvg -tu ns -fit none
-# gmx select -s "${MDNAME}.tpr" -n index.ndx -on pocket.ndx \
-#   -select "group \"Protein\" and same residue as (within 0.45 of group \"${LIG}\"); group \"${LIG}\""
-# sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
-# gmx pairdist -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -n pocket.ndx \
-#   -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel "group \"${LIG}\"" -type min
+# Calculate ligand RMSD and pocket-ligand distance
+echo -e "q" | gmx make_ndx -f "${MDNAME}.gro" -o index.ndx
+printf "${LIG}\n" | gmx rms -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" \
+  -n index.ndx -o trj_rmsd_lig.xvg -tu ns -fit none
+gmx select -s "${MDNAME}.tpr" -n index.ndx -on pocket.ndx \
+  -select "group \"Protein\" and same residue as (within 0.45 of group \"${LIG}\"); group \"${LIG}\""
+sed -i '0,/^\[.*\]$/s//[ Pocket ]/' pocket.ndx
+gmx pairdist -f "${MDNAME}.xtc" -s "${MDNAME}.tpr" -n pocket.ndx \
+  -o trj_dist_lig.xvg -tu ns -ref 'group "Pocket"' -sel "group \"${LIG}\"" -type min
 
-# python ~/mdtools/interaction_analysis.py --trj_name "${TRJNAME}_strip"
+python ~/mdtools/interaction_analysis.py --trj_name "${TRJNAME}_strip"
 
 ### ---------------------------- ###
 ###       Binding Affinity       ###
